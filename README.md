@@ -1,5 +1,7 @@
 # detro
 
+`npm install -g @vitortrack777/detro` — o comando instalado é `detro`.
+
 CLI de desenvolvimento com IA para projetos TypeScript (NestJS em `api/`, React em `web/`).
 O Ollama gera o código localmente; o Claude Code revisa, corrige e assume quando o Ollama erra.
 Nada é escrito no projeto sem passar pela validação de tipos e pelo `detro apply`.
@@ -13,7 +15,7 @@ Nada é escrito no projeto sem passar pela validação de tipos e pelo `detro ap
 ## Instalação
 
 ```bash
-npm install -g detro
+npm install -g @vitortrack777/detro
 ```
 
 Ou a partir do código, para desenvolver o próprio detro:
