@@ -1,0 +1,38 @@
+{
+  "name": "detro",
+  "version": "0.1.0",
+  "description": "CLI de desenvolvimento com IA: gera e corrige código com Ollama, revisado e completado pelo Claude Code",
+  "type": "module",
+  "bin": {
+    "detro": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "setup": "bash ./detro.sh install",
+    "update": "bash ./detro.sh update",
+    "uninstall-cli": "bash ./detro.sh uninstall"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.8.0",
+    "chalk": "^5.4.1"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.js",
+    "ai/",
+    "detro.sh",
+    "detro-completion.bash"
+  ],
+  "keywords": [
+    "cli",
+    "ollama",
+    "claude",
+    "nestjs",
+    "react",
+    "codegen"
+  ]
+}
