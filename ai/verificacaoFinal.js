@@ -108,8 +108,11 @@ export async function verificarFeature({ projectDir, config, request, files, pri
   const reprovadas = [];
 
   for (const item of aceitas) {
+    const original = item.original.action === 'modify'
+      ? await readFile(path.join(projectDir, item.correcao.path), 'utf8').catch(() => null)
+      : null;
     item.validacao = /\.(ts|tsx)$/.test(item.correcao.path)
-      ? await validateFile({ projectDir, relativePath: item.correcao.path, content: item.correcao.conteudo, virtualFiles })
+      ? await validateFile({ projectDir, relativePath: item.correcao.path, content: item.correcao.conteudo, original, virtualFiles })
       : { valid: true, errors: [] };
     if (!item.validacao.valid) reprovadas.push(item);
   }

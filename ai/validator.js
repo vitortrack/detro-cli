@@ -112,13 +112,18 @@ function validateShape(content) {
   return errors;
 }
 
-export async function validateFile({ projectDir, relativePath, content, virtualFiles, rules = {}, mode = 'full', lint = true }) {
+export async function validateFile({ projectDir, relativePath, content, original = null, virtualFiles, rules = {}, mode = 'full', lint = true }) {
   const errors = validateShape(content);
   const warnings = [];
   const workspace = workspaceOf(relativePath);
   const importPaths = extractImports(projectDir, relativePath, content);
   const dependencies = workspace ? await loadDependencies(projectDir, workspace) : new Set();
   const typesAvailable = Boolean(loadTypeScript(projectDir, workspace ?? '.'));
+  const pacotesJaUsados = new Set(
+    original === null
+      ? []
+      : extractImports(projectDir, relativePath, original).filter(isPackageImport).map((item) => packageName(item.replace(/^node:/, ''))),
+  );
 
   for (const importPath of importPaths) {
     for (const forbidden of rules.forbiddenImports ?? []) {
@@ -133,7 +138,7 @@ export async function validateFile({ projectDir, relativePath, content, virtualF
 
       if (rules.allowedPackages && !rules.allowedPackages.includes(name)) {
         errors.push(`Pacote "${name}" não é permitido aqui. Use só: ${rules.allowedPackages.join(', ')}.`);
-      } else if (!builtin && !dependencies.has(name)) {
+      } else if (!builtin && !dependencies.has(name) && !pacotesJaUsados.has(name)) {
         errors.push(`Pacote "${name}" não está declarado em ${workspace}/package.json. Use outro já instalado ou rode: cd ${workspace} && npm install ${name}`);
       }
 

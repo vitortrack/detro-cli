@@ -113,7 +113,7 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
 
     const tipado = /\.(ts|tsx)$/.test(relativo);
     const validacao = tipado
-      ? await validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo })
+      ? await validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo, original })
       : { valid: true, errors: [] };
 
     console.log();
