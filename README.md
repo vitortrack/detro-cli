@@ -43,6 +43,20 @@ detro check                             # tipos + regras nos arquivos alterados
 O Claude roda sem ferramentas de escrita (`--tools ""` ou só Read/Grep/Glob no modo livre) e com
 `--setting-sources project`, para não carregar plugins pessoais. Quem escreve os arquivos é o `detro`.
 
+## Detecção de stack
+
+`detro ai perfil` mostra o que o detro encontrou no projeto, e isso entra no contexto de todo pedido
+(Ollama e Claude):
+
+- **JavaScript/TypeScript** pelos `package.json`: React, Vue, Angular, Svelte, Next.js, Vite, React Query,
+  Tailwind, NestJS, Express, Fastify, Prisma, TypeORM, Drizzle, Mongoose…
+- **Outras linguagens** pelos arquivos de projeto: Python (Django, FastAPI, Flask), PHP (Laravel, Symfony),
+  Java/Kotlin (Spring Boot), Go (Gin, Fiber, Echo), Ruby (Rails), .NET (ASP.NET Core), Rust
+- **Infra** pelos `docker-compose`: PostgreSQL, PostGIS, MySQL, MongoDB, Redis, RabbitMQ…
+
+Se o projeto não segue as convenções dos geradores, `detro plan` vai direto para o modo livre.
+Arquivos que não são TypeScript saem sem checagem de tipos: revise o diff antes do `detro apply`.
+
 ## Configuração (`.detro/config.json` no projeto)
 
 ```json

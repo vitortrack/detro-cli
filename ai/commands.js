@@ -216,6 +216,8 @@ export async function runAiCommand({ projectDir, args }) {
     console.log(`Frontend:  ${list(profile.stacks.frontend)}`);
     console.log(`Backend:   ${list(profile.stacks.backend)}`);
     console.log(`Banco/ORM: ${list(profile.stacks.database)}`);
+    console.log(`Outras:    ${list(profile.stacks.outras)}`);
+    console.log(`Infra:     ${list(profile.stacks.infra)}`);
     console.log(`TypeScript: ${profile.tsProjects.length > 0 ? profile.tsProjects.map((item) => `${item.dir}${item.typescript ? '' : chalk.yellow(' (sem typescript instalado)')}`).join(', ') : chalk.dim('nenhum tsconfig.json')}`);
     console.log();
     console.log(chalk.cyan.bold('Convenções que os formatos especializados usam:'));
@@ -899,6 +901,10 @@ export async function runPlanCommand({ projectDir, args }) {
     }
 
     return result.preview.errors.length > 0 ? 1 : 0;
+  }
+
+  if (result.blocked && claudeLigado) {
+    return planejarLivre({ projectDir, config, request, motivo: result.message, printDiff });
   }
 
   if (result.blocked) {

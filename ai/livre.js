@@ -28,8 +28,9 @@ const SCHEMA = {
   required: ['resumo', 'arquivos', 'sugestoes'],
 };
 
-function montarPedido(request) {
+function montarPedido(request, contexto) {
   return [
+    contexto ?? '',
     'Você está implementando um pedido neste repositório. Você só tem ferramentas de LEITURA: explore o código com Read/Grep/Glob e siga os CLAUDE.md (raiz, api/, web/, .claude/).',
     'Não escreva arquivos. Devolva a mudança como proposta: para cada arquivo criado ou alterado, o conteúdo COMPLETO final em "conteudo" e o caminho relativo à raiz em "path".',
     'Mexa só no necessário para o pedido funcionar. Em "resumo", uma frase do que muda; em "sugestoes", até 5 observações curtas em pt-BR (vazio se não houver).',
@@ -77,7 +78,7 @@ function chamarClaude({ projectDir, request, claude }) {
       }
     });
 
-    child.stdin.end(montarPedido(request));
+    child.stdin.end(montarPedido(request, claude.projectContext));
   });
 }
 
@@ -87,7 +88,7 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   }
   console.log(chalk.magenta('▸ Modo livre: o Claude está lendo o projeto e preparando a mudança…'));
 
-  const proposta = await chamarClaude({ projectDir, request, claude: config.ai.ollama.claude ?? {} });
+  const proposta = await chamarClaude({ projectDir, request, claude: { ...config.ai.ollama.claude, projectContext: config.ai.ollama.projectContext } });
   const files = [];
   let comProblema = 0;
 
@@ -105,12 +106,13 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
       continue;
     }
 
-    const validacao = /\.(ts|tsx)$/.test(relativo)
+    const tipado = /\.(ts|tsx)$/.test(relativo);
+    const validacao = tipado
       ? await validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo })
       : { valid: true, errors: [] };
 
     console.log();
-    console.log(chalk.white.bold(`${arquivo.acao === 'create' ? '+' : '~'} ${relativo}`) + (validacao.valid ? chalk.green('  ✓ tipos ok') : chalk.red('  ✗ com problemas')));
+    console.log(chalk.white.bold(`${arquivo.acao === 'create' ? '+' : '~'} ${relativo}`) + (!tipado ? chalk.dim('  (sem checagem de tipos — revise o diff)') : validacao.valid ? chalk.green('  ✓ tipos ok') : chalk.red('  ✗ com problemas')));
     for (const erro of validacao.errors ?? []) {
       console.log(chalk.red(`    ${erro}`));
     }

@@ -59,10 +59,12 @@ function deepMerge(base, override) {
   return result;
 }
 
-function comContextoDoProjeto(config, projectDir) {
+async function comContextoDoProjeto(config, projectDir) {
   const nome = config.projeto?.nome ?? path.basename(projectDir);
   const descricao = config.projeto?.descricao;
-  config.ai.ollama.projectContext = `PROJETO: ${nome}${descricao ? ` — ${descricao}` : ''}`;
+  const { detectProfile, describeProfile } = await import('./profile.js');
+  const stack = describeProfile(await detectProfile(projectDir));
+  config.ai.ollama.projectContext = [`PROJETO: ${nome}${descricao ? ` — ${descricao}` : ''}`, stack].filter(Boolean).join('\n');
   return config;
 }
 
@@ -73,10 +75,10 @@ export function getConfigPath(projectDir) {
 export async function loadDetroConfig(projectDir) {
   try {
     const raw = await readFile(getConfigPath(projectDir), 'utf8');
-    return comContextoDoProjeto(deepMerge(DEFAULT_CONFIG, JSON.parse(raw)), projectDir);
+    return await comContextoDoProjeto(deepMerge(DEFAULT_CONFIG, JSON.parse(raw)), projectDir);
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      return comContextoDoProjeto(structuredClone(DEFAULT_CONFIG), projectDir);
+      return await comContextoDoProjeto(structuredClone(DEFAULT_CONFIG), projectDir);
     }
 
     if (error instanceof SyntaxError) {

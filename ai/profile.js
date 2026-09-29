@@ -5,7 +5,7 @@ import { findTsProjects } from './review.js';
 import { loadTypeScript } from './typescript.js';
 
 const STACKS = {
-  frontend: { react: 'React', vue: 'Vue', '@angular/core': 'Angular', svelte: 'Svelte', next: 'Next.js', 'solid-js': 'Solid' },
+  frontend: { react: 'React', vue: 'Vue', '@angular/core': 'Angular', svelte: 'Svelte', next: 'Next.js', 'solid-js': 'Solid', vite: 'Vite', '@tanstack/react-query': 'React Query', 'react-router-dom': 'React Router', tailwindcss: 'Tailwind', zustand: 'Zustand' },
   backend: { '@nestjs/core': 'NestJS', express: 'Express', fastify: 'Fastify', koa: 'Koa', hono: 'Hono' },
   database: { pg: 'PostgreSQL (pg)', typeorm: 'TypeORM', prisma: 'Prisma', '@prisma/client': 'Prisma', sequelize: 'Sequelize', mongoose: 'MongoDB (mongoose)', knex: 'Knex', 'drizzle-orm': 'Drizzle' },
 };
@@ -42,6 +42,80 @@ async function packageFiles(projectDir, dir = '.', depth = 0, found = []) {
   }
 
   return found;
+}
+
+const ECOSSISTEMAS = [
+  { arquivo: /^(requirements.*\.txt|pyproject\.toml|Pipfile)$/, linguagem: 'Python', frameworks: { django: 'Django', fastapi: 'FastAPI', flask: 'Flask', sqlalchemy: 'SQLAlchemy' } },
+  { arquivo: /^composer\.json$/, linguagem: 'PHP', frameworks: { 'laravel/framework': 'Laravel', 'symfony/': 'Symfony' } },
+  { arquivo: /^(pom\.xml|build\.gradle(\.kts)?)$/, linguagem: 'Java/Kotlin', frameworks: { 'spring-boot': 'Spring Boot', hibernate: 'Hibernate' } },
+  { arquivo: /^go\.mod$/, linguagem: 'Go', frameworks: { 'gin-gonic': 'Gin', 'gofiber': 'Fiber', 'labstack/echo': 'Echo', 'gorm.io': 'GORM' } },
+  { arquivo: /^Gemfile$/, linguagem: 'Ruby', frameworks: { rails: 'Rails' } },
+  { arquivo: /\.csproj$/, linguagem: '.NET', frameworks: { 'Microsoft.AspNetCore': 'ASP.NET Core', EntityFrameworkCore: 'Entity Framework' } },
+  { arquivo: /^Cargo\.toml$/, linguagem: 'Rust', frameworks: { actix: 'Actix', axum: 'Axum' } },
+];
+
+const INFRA = { 'postgis/': 'PostGIS', 'postgres': 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', mongo: 'MongoDB', redis: 'Redis', rabbitmq: 'RabbitMQ', elasticsearch: 'Elasticsearch', nginx: 'Nginx' };
+
+async function arquivosMarcadores(projectDir, dir = '.', depth = 0, found = []) {
+  if (depth > 2) {
+    return found;
+  }
+
+  let entries = [];
+
+  try {
+    entries = await readdir(path.join(projectDir, dir), { withFileTypes: true });
+  } catch {
+    return found;
+  }
+
+  for (const entry of entries) {
+    const relativo = path.posix.join(dir, entry.name);
+    if (entry.isFile() && (ECOSSISTEMAS.some((eco) => eco.arquivo.test(entry.name)) || /^(docker-)?compose.*\.ya?ml$/.test(entry.name))) {
+      found.push(relativo);
+    } else if (entry.isDirectory() && !entry.name.startsWith('.') && !['node_modules', 'dist', 'build', 'vendor', 'venv', 'target'].includes(entry.name)) {
+      await arquivosMarcadores(projectDir, relativo, depth + 1, found);
+    }
+  }
+
+  return found;
+}
+
+async function outrasStacks(projectDir) {
+  const linguagens = new Set();
+  const infra = new Set();
+
+  for (const arquivo of await arquivosMarcadores(projectDir)) {
+    const nome = path.posix.basename(arquivo);
+    const conteudo = (await read(projectDir, arquivo)) ?? '';
+
+    if (/compose.*\.ya?ml$/.test(nome)) {
+      for (const imagem of conteudo.matchAll(/image:\s*["']?([^\s"']+)/g)) {
+        const achado = Object.entries(INFRA).find(([chave]) => imagem[1].toLowerCase().includes(chave));
+        if (achado) infra.add(achado[1]);
+      }
+      continue;
+    }
+
+    const eco = ECOSSISTEMAS.find((item) => item.arquivo.test(nome));
+    const frameworks = Object.entries(eco.frameworks).filter(([chave]) => conteudo.toLowerCase().includes(chave.toLowerCase())).map(([, rotulo]) => rotulo);
+    linguagens.add(frameworks.length > 0 ? `${eco.linguagem} (${frameworks.join(', ')})` : eco.linguagem);
+  }
+
+  return { outras: [...linguagens], infra: [...infra] };
+}
+
+export function describeProfile(profile) {
+  const partes = [
+    ['Frontend', profile.stacks.frontend],
+    ['Backend', profile.stacks.backend],
+    ['Banco/ORM', profile.stacks.database],
+    ['Outras linguagens', profile.stacks.outras],
+    ['Infra', profile.stacks.infra],
+  ].filter(([, itens]) => itens?.length > 0).map(([rotulo, itens]) => `${rotulo}: ${itens.join(', ')}`);
+
+  const convencoes = profile.capabilities.fullstack ? ' Segue as convenções completas do detro (NestJS multi-tenant + React).' : '';
+  return partes.length > 0 ? `STACK DETECTADA: ${partes.join('; ')}.${convencoes}` : '';
 }
 
 async function check(projectDir, file, pattern) {
@@ -95,7 +169,7 @@ export async function detectProfile(projectDir) {
   const typesOk = tsProjects.some((project) => project.typescript);
 
   return {
-    stacks: Object.fromEntries(Object.entries(stacks).map(([kind, set]) => [kind, [...set]])),
+    stacks: { ...Object.fromEntries(Object.entries(stacks).map(([kind, set]) => [kind, [...set]])), ...(await outrasStacks(projectDir)) },
     tsProjects,
     conventions,
     capabilities: {
