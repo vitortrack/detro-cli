@@ -187,6 +187,15 @@ export function finishCoverage(requirements, prepared) {
 export async function createPlan({ projectDir, config, request, onProgress, onStage = () => {} }) {
   const analysis = analyzeRequest(request);
   const profile = await detectProfile(projectDir);
+  const geracao = config.ai.geracao ?? 'auto';
+
+  if (geracao === 'livre') {
+    return { blocked: true, analysis, message: 'ai.geracao está como "livre": o pedido vai direto para o Claude.' };
+  }
+
+  if (geracao === 'exemplo') {
+    profile.capabilities = { ...profile.capabilities, menu: false, frontend: false, fullstack: false };
+  }
 
   const bespoke = analysis.scope === 'frontend' && analysis.structured && !/\bcadastr/i.test(request);
 

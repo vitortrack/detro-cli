@@ -91,8 +91,20 @@ Arquivos que não são TypeScript saem sem checagem de tipos: revise o diff ante
 `start`, `stop`, `restart`, `logs` etc. repassam para um script `appDev` (ou `app`) na raiz do projeto.
 Para usar outro nome: `DETRO_APP_SCRIPT=scripts/dev detro restart api`.
 
+## Como o detro gera features
+
+O modo é escolhido pelo que `detro ai perfil` encontra no projeto (ou forçado por `"ai": { "geracao": ... }`):
+
+| Modo | Quando | Como |
+|---|---|---|
+| **Criação por exemplo** | Projetos TypeScript em geral (Express, NestJS, Next.js, React…) | Acha uma feature que já existe no projeto e copia o padrão dela para a nova (ex.: `users` → `products`) |
+| **Modo livre** | Qualquer stack, ou quando não há feature modelo | O Claude lê o projeto e propõe a mudança completa |
+| **Preset NestJS multi-tenant** | Só quando o projeto tem todas as convenções do preset | Templates prontos para cadastro, consulta, tela e menu |
+
+`"geracao": "exemplo"` desliga o preset mesmo que o projeto o atenda; `"geracao": "livre"` manda tudo para o Claude.
+
 ## Limites conhecidos
 
-Os geradores de cadastro, consulta e tela (`detro plan` sem `--livre`) assumem uma API NestJS com
-SQL cru, multi-tenant por `operator_id`, `@RequirePermission` e front com React Query.
-`detro ai perfil` mostra se o projeto atende; se não atender, use `--livre`, `edit` ou `fix`.
+- A criação por exemplo precisa de pelo menos uma feature com arquivos em mais de uma camada; sem ela, o pedido vai para o modo livre.
+- Arquivos que não são TypeScript não passam por checagem de tipos: revise o diff antes do `detro apply`.
+- O preset NestJS multi-tenant só é usado em projetos com as convenções dele (`detro ai perfil` lista quais).

@@ -232,9 +232,16 @@ export async function runAiCommand({ projectDir, args }) {
     console.log(chalk.cyan.bold('O que o detro faz aqui:'));
     console.log(yes(profile.capabilities.review, 'check / fix com o compilador do projeto'));
     console.log(yes(true, 'mudanças pontuais em arquivos existentes (detro plan "no arquivo/tela X, ...")'));
-    console.log(profile.capabilities.fullstack
-      ? chalk.green('  ✓ criação especializada: cadastro completo, só frontend, consulta, menu')
-      : chalk.yellow('  ~ criação por exemplo: copia o padrão de uma feature parecida deste projeto (sem as convenções especializadas)'));
+    const config = await loadDetroConfig(projectDir);
+    const geracao = config.ai.geracao ?? 'auto';
+    const modo = geracao === 'livre'
+      ? 'modo livre: todo pedido vai direto para o Claude (ai.geracao = "livre")'
+      : geracao !== 'exemplo' && profile.capabilities.fullstack
+        ? 'preset NestJS multi-tenant: cadastro completo, só frontend, consulta e menu com os templates do detro'
+        : 'criação por exemplo: copia o padrão de uma feature que já existe neste projeto; sem modelo, cai no modo livre';
+    console.log(chalk.green(`  ✓ geração de features: ${modo}`));
+    console.log(chalk.green('  ✓ modo livre (detro plan --livre): o Claude lê o projeto e propõe a mudança, em qualquer stack'));
+    console.log(chalk.dim('    Para forçar outro modo: "ai": { "geracao": "auto" | "exemplo" | "livre" } em .detro/config.json'));
     return 0;
   }
 
