@@ -1,6 +1,6 @@
 {
   "name": "@vitortrack777/detro",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI de desenvolvimento com IA: gera e corrige código com Ollama, revisado e completado pelo Claude Code",
   "type": "module",
   "bin": {
