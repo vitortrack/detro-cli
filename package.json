@@ -16,8 +16,7 @@
     "@inquirer/prompts": "^7.8.0",
     "chalk": "^5.4.1"
   },
-  "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   },
@@ -25,7 +24,8 @@
     "index.js",
     "ai/",
     "detro.sh",
-    "detro-completion.bash"
+    "detro-completion.bash",
+    "LICENSE"
   ],
   "keywords": [
     "cli",
@@ -43,5 +43,8 @@
   "homepage": "https://github.com/vitortrack/detro-cli#readme",
   "bugs": {
     "url": "https://github.com/vitortrack/detro-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

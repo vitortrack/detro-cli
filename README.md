@@ -13,6 +13,12 @@ Nada é escrito no projeto sem passar pela validação de tipos e pelo `detro ap
 ## Instalação
 
 ```bash
+npm install -g detro
+```
+
+Ou a partir do código, para desenvolver o próprio detro:
+
+```bash
 git clone git@github.com:vitortrack/detro-cli.git
 cd detro-cli
 bash ./detro.sh install   # npm install + npm link + autocompletar do bash
