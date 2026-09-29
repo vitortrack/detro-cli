@@ -40,13 +40,12 @@ function montarPedido(request, contexto) {
   ].join('\n');
 }
 
-function chamarClaude({ projectDir, request, claude }) {
+export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude }) {
   const args = [
     '-p',
-    '--tools', 'Read', 'Grep', 'Glob',
-    '--allowedTools', 'Read', 'Grep', 'Glob',
+    ...(tools.length > 0 ? ['--tools', ...tools, '--allowedTools', ...tools] : ['--tools', '']),
     '--output-format', 'json',
-    '--json-schema', JSON.stringify(SCHEMA),
+    '--json-schema', JSON.stringify(schema),
     '--no-session-persistence',
     '--setting-sources', 'project',
   ];
@@ -78,7 +77,7 @@ function chamarClaude({ projectDir, request, claude }) {
       }
     });
 
-    child.stdin.end(montarPedido(request, claude.projectContext));
+    child.stdin.end(prompt);
   });
 }
 
@@ -88,7 +87,13 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   }
   console.log(chalk.magenta('▸ Modo livre: o Claude está lendo o projeto e preparando a mudança…'));
 
-  const proposta = await chamarClaude({ projectDir, request, claude: { ...config.ai.ollama.claude, projectContext: config.ai.ollama.projectContext } });
+  const proposta = await chamarClaudeJson({
+    projectDir,
+    prompt: montarPedido(request, config.ai.ollama.projectContext),
+    schema: SCHEMA,
+    tools: ['Read', 'Grep', 'Glob'],
+    claude: config.ai.ollama.claude ?? {},
+  });
   const files = [];
   let comProblema = 0;
 

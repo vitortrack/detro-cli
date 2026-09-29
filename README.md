@@ -39,6 +39,7 @@ detro check                             # tipos + regras nos arquivos alterados
 | O Ollama erra `afterAttempts` vezes seguidas | A tentativa seguinte vai direto para o Claude |
 | O Ollama cai, estoura o tempo ou devolve JSON inválido | O Claude assume |
 | O pipeline não encaixa o pedido | Modo livre: o Claude lê o projeto (só leitura) e propõe a mudança com diff |
+| Fim do `detro apply --dry-run` | Verificação final: o Claude confere a coerência entre todos os arquivos da feature (nomes, rotas, tipos, permissões, menu). As correções só entram se **todas** passarem nos tipos juntas; problemas que já existiam no projeto viram sugestões `Já existia:` em vez de alterações |
 
 O Claude roda sem ferramentas de escrita (`--tools ""` ou só Read/Grep/Glob no modo livre) e com
 `--setting-sources project`, para não carregar plugins pessoais. Quem escreve os arquivos é o `detro`.
@@ -65,7 +66,7 @@ Arquivos que não são TypeScript saem sem checagem de tipos: revise o diff ante
   "ai": {
     "ollama": {
       "model": "qwen2.5-coder:7b",
-      "claude": { "enabled": true, "revisar": true, "afterAttempts": 2, "model": null, "usarApiKey": false }
+      "claude": { "enabled": true, "revisar": true, "verificarFeature": true, "afterAttempts": 2, "model": null, "usarApiKey": false }
     },
     "references": {
       "formModal": "web/src/components/exemplo/ExemploFormModal.tsx",

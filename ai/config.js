@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
       claude: {
         enabled: true,
         revisar: true,
+        verificarFeature: true,
         usarApiKey: false,
         afterAttempts: 2,
         model: null,

@@ -8,6 +8,7 @@ import { loadDetroConfig, requireOllama, saveDetroConfig } from './config.js';
 import { applyMigration, findAppScript, findPostgresContainer, restartServices } from './devEnvironment.js';
 import { unifiedDiff } from './diff.js';
 import { planejarLivre } from './livre.js';
+import { verificarFeature } from './verificacaoFinal.js';
 import { prepareFix } from './fixer.js';
 import { generateCrud, prepareSpec, sha256 } from './generator.js';
 import { loadImplementation, markImplementationApplied, saveAttempt, saveImplementation } from './implementationStore.js';
@@ -1004,6 +1005,8 @@ async function runDryRun(projectDir) {
     console.log(chalk.yellow('Tente de novo (a IA varia entre execuções), aumente as correções em ai.generation.maxRepairs, ou use um modelo maior: detro ai model qwen2.5-coder:14b'));
     return 1;
   }
+
+  result.files = await verificarFeature({ projectDir, config, request: plan.request, files: result.files, printDiff });
 
   const implementationFile = await saveImplementation({
     projectDir,

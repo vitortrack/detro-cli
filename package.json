@@ -34,5 +34,14 @@
     "nestjs",
     "react",
     "codegen"
-  ]
+  ],
+  "author": "vitortrack",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vitortrack/detro-cli.git"
+  },
+  "homepage": "https://github.com/vitortrack/detro-cli#readme",
+  "bugs": {
+    "url": "https://github.com/vitortrack/detro-cli/issues"
+  }
 }
