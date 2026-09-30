@@ -8,7 +8,7 @@ import { loadDetroConfig, requireOllama, saveDetroConfig } from './config.js';
 import { applyMigration, findAppScript, findPostgresContainer, restartServices } from './devEnvironment.js';
 import { unifiedDiff } from './diff.js';
 import { planejarLivre } from './livre.js';
-import { oferecerAjusteClaude } from './ajustePlano.js';
+import { ajustarPlano, oferecerAjusteClaude } from './ajustePlano.js';
 import { verificarFeature } from './verificacaoFinal.js';
 import { prepareFix } from './fixer.js';
 import { generateCrud, prepareSpec, sha256 } from './generator.js';
@@ -56,6 +56,8 @@ Uso:
                                   ## Restrições...). "somente em memória"/"sem backend" gera
                                   só o frontend; nomes, título, botão e ações pedidos são seguidos.
   detro plan --revalidar          Revalida o plano depois de editar o JSON à mão
+  detro plan --ajustar "<o que mudar>"  Mantém o plano salvo e pede ao Claude só essa mudança
+                                  (ex.: "trocar o ícone para Users e tirar a exclusão")
   detro apply --dry-run           Gera e valida o código, sem escrever no projeto
               --descartar                   sobrescreve uma proposta do --livre/fix ainda não aplicada
   detro apply                     Escreve o que o último dry-run (ou fix/--livre) preparou e oferece
@@ -751,6 +753,25 @@ async function pedirPedidoCompleto({ projectDir, request, motivo }) {
 export async function runPlanCommand({ projectDir, args }) {
   const config = await loadDetroConfig(projectDir);
 
+  if (args.includes('--ajustar')) {
+    const { plan } = await loadLastPlan(projectDir);
+
+    if (!plan.spec || (plan.recipe && plan.recipe !== 'crud')) {
+      throw new Error('O --ajustar funciona com planos de cadastro. Para este plano, edite .detro/last-plan.json e rode detro plan --revalidar.');
+    }
+    if (!process.stdin.isTTY) {
+      throw new Error('O --ajustar precisa de um terminal interativo para você escolher as mudanças.');
+    }
+
+    const instrucao = args.filter((arg) => !arg.startsWith('--')).join(' ').trim()
+      || await perguntarTexto({ message: 'O que mudar no plano (o resto fica igual)?', required: true });
+    const prepared = await prepareSpec(projectDir, plan.spec, plan.requirements ?? []);
+    const ajuste = await ajustarPlano({ projectDir, config, plan, instrucao, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported });
+
+    if (!ajuste) return 0;
+    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+  }
+
   if (args.includes('--revalidar')) {
     const { filePath, plan } = await loadLastPlan(projectDir);
 
@@ -813,6 +834,7 @@ export async function runPlanCommand({ projectDir, args }) {
     printPlanResult(prepared);
     console.log();
     console.log(chalk.dim(`Plano: ${filePath}`));
+    console.log(chalk.dim('Para mudar só uma parte do plano: detro plan --ajustar "o que mudar"'));
 
     const ajuste = await oferecerAjusteClaude({ projectDir, config, plan, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported });
     if (ajuste) {
@@ -955,7 +977,8 @@ export async function runPlanCommand({ projectDir, args }) {
 
   console.log();
   console.log(chalk.dim(`Plano salvo em: ${planFile}`));
-  console.log(chalk.dim('Ajuste campos, rótulos, rota ou permissão editando o JSON e rode "detro plan --revalidar".'));
+  console.log(chalk.dim('Ajuste campos, rótulos, rota ou permissão editando o JSON e rode "detro plan --revalidar",'));
+  console.log(chalk.dim('ou peça só a mudança ao Claude: detro plan --ajustar "o que mudar".'));
   console.log(chalk.yellow('Nenhum arquivo do projeto foi alterado.'));
 
   const ajuste = await oferecerAjusteClaude({ projectDir, config, plan: { request, spec: result.spec, requirements: result.requirements }, errors: result.errors, warnings: result.warnings, unsupported: result.spec.unsupported });

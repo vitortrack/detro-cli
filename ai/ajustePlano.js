@@ -31,7 +31,7 @@ function montarPrompt({ plan, errors, warnings, unsupported, contexto, orientaca
     '"mudancas" (cada troca proposta, independente das outras, com "descricao" curta e "motivo"),',
     'e "specJson" com o objeto "spec" COMPLETO já com TODAS as mudanças aplicadas, no mesmo formato do atual (mesmas chaves), serializado como JSON.',
     'Se a melhor solução for não criar o cadastro, devolva o spec atual sem mudanças e diga isso em "analise".',
-    ...(orientacao ? ['', 'ORIENTAÇÃO DO USUÁRIO (tem prioridade sobre a sua proposta):', orientacao] : []),
+    ...(orientacao ? ['', 'ORIENTAÇÃO DO USUÁRIO (tem prioridade sobre a sua proposta; mude só o que ela pede e mantenha o resto do spec igual):', orientacao] : []),
     '',
     'PEDIDO ORIGINAL:',
     plan.request,
@@ -110,8 +110,15 @@ export async function oferecerAjusteClaude({ projectDir, config, plan, errors = 
   if (inicio === 'seguir') return null;
   if (inicio === 'reformular') return { acao: 'replanejar', pedido: await input({ message: 'Novo pedido:', default: plan.request, required: true }) };
 
+  return conversarComClaude({ projectDir, config, plan, errors, warnings, unsupported });
+}
+
+export function ajustarPlano({ projectDir, config, plan, instrucao, errors = [], warnings = [], unsupported = [] }) {
+  return conversarComClaude({ projectDir, config, plan, errors, warnings, unsupported, orientacao: instrucao });
+}
+
+async function conversarComClaude({ projectDir, config, plan, errors, warnings, unsupported, orientacao }) {
   const contexto = { plan, errors, warnings, unsupported };
-  let orientacao;
 
   for (;;) {
     const resposta = await perguntarAoClaude({ projectDir, config, orientacao, ...contexto });

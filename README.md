@@ -65,7 +65,13 @@ O `detro plan` salva o plano em `.detro/last-plan.json`. Para ajustar sem gerar 
 ```bash
 # edite .detro/last-plan.json (entity, route, fields, menu, permissão...) e depois:
 detro plan --revalidar                  # valida o plano salvo e mostra o resultado
+detro plan --ajustar "trocar o ícone para Users e tirar a exclusão"
+                                        # mantém o plano e pede ao Claude só essa mudança
 ```
+
+O `--ajustar` serve também para plano **sem** problemas: o Claude muda só o que você pediu, mostra
+o que mantém e cada mudança numerada, e você escolhe no mesmo menu abaixo (aplicar todas, escolher
+quais, orientar de novo, reformular ou manter). Sem texto, ele pergunta o que mudar.
 
 Em cadastros, quando o plano (novo ou revalidado) tem **erros**, **avisos** ou itens **não cobertos**,
 o detro pergunta o que fazer:
