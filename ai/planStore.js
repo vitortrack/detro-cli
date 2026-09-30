@@ -7,7 +7,7 @@ export function getPlanFile(projectDir) {
   return path.join(projectDir, '.detro', 'last-plan.json');
 }
 
-export async function saveLastPlan({ projectDir, request, spec, requirements = [], createdAt, recipe = 'crud', operation, edit, example, evidence }) {
+export async function saveLastPlan({ projectDir, request, spec, requirements = [], createdAt, recipe = 'crud', operation, edit, example, evidence, generic }) {
   const filePath = getPlanFile(projectDir);
   await mkdir(path.dirname(filePath), { recursive: true });
 
@@ -16,7 +16,7 @@ export async function saveLastPlan({ projectDir, request, spec, requirements = [
     recipe,
     createdAt: createdAt ?? new Date().toISOString(),
     request,
-    ...(recipe === 'menu' ? { operation } : recipe === 'edit' ? { edit } : { requirements, spec, ...(example ? { example } : {}), ...(evidence ? { evidence } : {}) }),
+    ...(recipe === 'menu' ? { operation } : recipe === 'edit' ? { edit } : recipe === 'generico' ? { generic } : { requirements, spec, ...(example ? { example } : {}), ...(evidence ? { evidence } : {}) }),
   };
 
   await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -45,7 +45,7 @@ export async function loadLastPlan(projectDir) {
     throw new Error(`O arquivo .detro/last-plan.json não é um JSON válido (${error.message}). Corrija a edição ou gere de novo com detro plan.`);
   }
 
-  if (plan.version !== PLAN_VERSION || (!plan.spec && !plan.operation && !plan.edit)) {
+  if (plan.version !== PLAN_VERSION || (!plan.spec && !plan.operation && !plan.edit && !plan.generic)) {
     throw new Error('O último plano está no formato antigo. Gere de novo com: detro plan "descrição da feature"');
   }
 

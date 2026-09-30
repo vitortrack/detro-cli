@@ -21,12 +21,19 @@ const SCHEMA = {
   required: ['analise', 'manter', 'mudancas', 'specJson'],
 };
 
+const eGenerico = (plan) => plan.recipe === 'generico';
+const objetoDoPlano = (plan) => (eGenerico(plan) ? plan.generic : plan.spec);
+
 function montarPrompt({ plan, errors, warnings, unsupported, contexto, orientacao }) {
   return [
     contexto ?? '',
-    'O gerador "detro" montou o plano de um cadastro CRUD neste repositório e a validação apontou os itens abaixo.',
+    eGenerico(plan)
+      ? 'O gerador "detro" montou um plano genérico (arquivos a criar ou alterar e passos) para um pedido neste repositório, e a validação apontou os itens abaixo.'
+      : 'O gerador "detro" montou o plano de um cadastro CRUD neste repositório e a validação apontou os itens abaixo.',
     'Os ERROS abaixo já dizem onde está cada conflito (arquivo e motivo). Decida a partir deles e do SPEC; leia no máximo 3 arquivos, e só se precisar confirmar algo. Não explore o repositório.',
-    'Descubra se o conflito é um cadastro que já existe (então o plano deve ser outro nome ou nem ser feito) ou só colisão de nome, e proponha a melhor solução.',
+    eGenerico(plan)
+      ? 'Proponha a melhor solução mantendo o plano o mais próximo possível do pedido.'
+      : 'Descubra se o conflito é um cadastro que já existe (então o plano deve ser outro nome ou nem ser feito) ou só colisão de nome, e proponha a melhor solução.',
     'Devolva: "analise" (2 a 4 frases em pt-BR), "manter" (o que do plano atual está certo e deve ficar),',
     '"mudancas" (cada troca proposta, independente das outras, com "descricao" curta e "motivo"),',
     'e "specJson" com o objeto "spec" COMPLETO já com TODAS as mudanças aplicadas, no mesmo formato do atual (mesmas chaves), serializado como JSON.',
@@ -36,8 +43,8 @@ function montarPrompt({ plan, errors, warnings, unsupported, contexto, orientaca
     'PEDIDO ORIGINAL:',
     plan.request,
     '',
-    'SPEC ATUAL:',
-    JSON.stringify(plan.spec, null, 2),
+    eGenerico(plan) ? 'PLANO ATUAL:' : 'SPEC ATUAL:',
+    JSON.stringify(objetoDoPlano(plan), null, 2),
     '',
     `ERROS: ${JSON.stringify(errors)}`,
     `AVISOS: ${JSON.stringify(warnings)}`,
@@ -88,13 +95,15 @@ function mostrarResposta(resposta) {
 }
 
 async function salvar({ projectDir, plan, spec }) {
-  await saveLastPlan({ projectDir, request: plan.request, spec, requirements: plan.requirements ?? [], createdAt: plan.createdAt });
+  await saveLastPlan(eGenerico(plan)
+    ? { projectDir, request: plan.request, recipe: 'generico', generic: spec, createdAt: plan.createdAt }
+    : { projectDir, request: plan.request, spec, requirements: plan.requirements ?? [], createdAt: plan.createdAt });
   return { acao: 'revalidar' };
 }
 
-export async function oferecerAjusteClaude({ projectDir, config, plan, errors = [], warnings = [], unsupported = [] }) {
+export async function oferecerAjusteClaude({ projectDir, config, plan, errors = [], warnings = [], unsupported = [], sempre = false }) {
   if (config.ai.ollama.claude?.enabled === false || !process.stdin.isTTY) return null;
-  if (errors.length + warnings.length + unsupported.length === 0) return null;
+  if (!sempre && errors.length + warnings.length + unsupported.length === 0) return null;
 
   console.log();
   const inicio = await select({
@@ -124,7 +133,7 @@ async function conversarComClaude({ projectDir, config, plan, errors, warnings, 
     const resposta = await perguntarAoClaude({ projectDir, config, orientacao, ...contexto });
     mostrarResposta(resposta);
 
-    const semMudanca = resposta.mudancas.length === 0 || JSON.stringify(resposta.spec) === JSON.stringify(plan.spec);
+    const semMudanca = resposta.mudancas.length === 0 || JSON.stringify(resposta.spec) === JSON.stringify(objetoDoPlano(plan));
     const escolha = await select({
       message: 'E agora?',
       choices: [

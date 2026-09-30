@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { sha256 } from './generator.js';
 import { saveImplementation } from './implementationStore.js';
 import { validateFile } from './validator.js';
+import { applyEdits } from './editor.js';
 import { workspaceOf } from './typescript.js';
 
 const SCHEMA = {
@@ -19,8 +20,16 @@ const SCHEMA = {
           path: { type: 'string' },
           acao: { type: 'string', enum: ['create', 'modify'] },
           conteudo: { type: 'string' },
+          edicoes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { find: { type: 'string' }, replace: { type: 'string' } },
+              required: ['find', 'replace'],
+            },
+          },
         },
-        required: ['path', 'acao', 'conteudo'],
+        required: ['path', 'acao', 'conteudo', 'edicoes'],
       },
     },
     sugestoes: { type: 'array', items: { type: 'string' } },
@@ -31,12 +40,16 @@ const SCHEMA = {
 const FOCO_NORMAL = 'Seja objetivo na leitura: os CLAUDE.md, um recurso parecido já existente como modelo e os arquivos onde ele é registrado (rotas, menu, módulos). Não varra o repositório.';
 const FOCO_ENXUTO = 'A tentativa anterior demorou demais. Leia no máximo 5 arquivos (um modelo parecido e onde ele é registrado) e entregue a versão MÍNIMA que atende o pedido: prefira criar arquivos novos e altere arquivos existentes só para registrar a tela (rota, menu). O que ficar de fora vai em "sugestoes".';
 
+const REGRA_EDICOES = 'Cada "find" é um trecho copiado EXATAMENTE do arquivo (mesmos espaços e quebras de linha), de 1 a 8 linhas, que apareça UMA única vez; "replace" é o mesmo trecho já alterado. Para inserir, use como "find" a linha vizinha e repita-a no "replace" junto com o código novo.';
+
 function montarPedido(request, contexto, foco = FOCO_NORMAL) {
   return [
     contexto ?? '',
     'Você está implementando um pedido neste repositório. Você só tem ferramentas de LEITURA: explore o código com Read/Grep/Glob e siga os CLAUDE.md (raiz, api/, web/, .claude/).',
     foco,
-    'Não escreva arquivos. Devolva a mudança como proposta: para cada arquivo criado ou alterado, o conteúdo COMPLETO final em "conteudo" e o caminho relativo à raiz em "path".',
+    'Não escreva arquivos. Devolva a mudança como proposta, com o caminho relativo à raiz em "path":',
+    '- arquivo NOVO (acao "create"): o conteúdo completo em "conteudo" e "edicoes" vazio;',
+    `- arquivo EXISTENTE (acao "modify"): "conteudo" vazio e, em "edicoes", só os trechos alterados. ${REGRA_EDICOES} NUNCA devolva o arquivo existente inteiro.`,
     'Mexa só no necessário para o pedido funcionar. Em "resumo", uma frase do que muda; em "sugestoes", até 5 observações curtas em pt-BR (vazio se não houver).',
     '',
     'PEDIDO:',
@@ -46,14 +59,24 @@ function montarPedido(request, contexto, foco = FOCO_NORMAL) {
 
 const SCHEMA_CORRECAO = {
   type: 'object',
-  properties: { conteudo: { type: 'string' } },
-  required: ['conteudo'],
+  properties: { conteudo: { type: 'string' }, edicoes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { find: { type: 'string' }, replace: { type: 'string' } },
+          required: ['find', 'replace'],
+        },
+      } },
+  required: ['conteudo', 'edicoes'],
 };
 
-function montarCorrecao(request, relativo, conteudo, erros) {
+function montarCorrecao(request, relativo, conteudo, erros, novo) {
   return [
     `Você propôs o arquivo ${relativo} para o pedido abaixo, mas ele não passou na validação do projeto.`,
-    'Você só tem ferramentas de LEITURA. Corrija SOMENTE os problemas listados, sem mudar o resto, e devolva o conteúdo COMPLETO final em "conteudo".',
+    'Você só tem ferramentas de LEITURA. Corrija SOMENTE os problemas listados, sem mudar o resto.',
+    novo
+      ? 'Devolva o conteúdo COMPLETO final em "conteudo" e "edicoes" vazio.'
+      : `Devolva "conteudo" vazio e, em "edicoes", só as trocas necessárias sobre o CONTEÚDO ATUAL abaixo. ${REGRA_EDICOES}`,
     '',
     'PROBLEMAS:',
     ...erros.map((erro) => `- ${erro}`),
@@ -127,7 +150,7 @@ export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claud
   });
 }
 
-export async function planejarLivre({ projectDir, config, request, motivo, printDiff }) {
+export async function planejarLivre({ projectDir, config, request, motivo, printDiff, planHash }) {
   if (motivo) {
     console.log(chalk.yellow(`  O pipeline do Ollama não encaixou o pedido (${motivo})`));
   }
@@ -150,6 +173,19 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   let comProblema = 0;
   const maxRepairs = config.ai.generation.maxRepairs ?? 2;
   const normalizar = (caminho) => path.normalize(caminho).replace(/^(\.\.[/\\])+/, '');
+  const originais = new Map();
+
+  for (const arquivo of proposta.arquivos) {
+    if (arquivo.acao !== 'modify') continue;
+    const relativo = normalizar(arquivo.path);
+    const original = await readFile(path.join(projectDir, relativo), 'utf8').catch(() => null);
+    originais.set(relativo, original);
+    if (original === null || ((arquivo.edicoes ?? []).length === 0 && arquivo.conteudo)) continue;
+    const aplicado = applyEdits(original, arquivo.edicoes ?? []);
+    arquivo.conteudo = aplicado.content;
+    arquivo.problemasEdicao = aplicado.problems;
+  }
+
   const virtualFiles = new Map(proposta.arquivos.map((arquivo) => [normalizar(arquivo.path), arquivo.conteudo]));
 
   console.log();
@@ -157,8 +193,7 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
 
   for (const arquivo of proposta.arquivos) {
     const relativo = normalizar(arquivo.path);
-    const absoluto = path.join(projectDir, relativo);
-    const original = arquivo.acao === 'modify' ? await readFile(absoluto, 'utf8').catch(() => null) : null;
+    const original = arquivo.acao === 'modify' ? originais.get(relativo) ?? null : null;
 
     if (arquivo.acao === 'modify' && original === null) {
       console.log(chalk.red(`  ✗ ${relativo}: o Claude propôs alterar um arquivo que não existe.`));
@@ -167,16 +202,20 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
     }
 
     const tipado = /\.(ts|tsx)$/.test(relativo);
-    const validar = () => (tipado
-      ? validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo, original, virtualFiles })
-      : { valid: true, errors: [] });
+    const validar = async () => {
+      const tipos = tipado
+        ? await validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo, original, virtualFiles })
+        : { valid: true, errors: [] };
+      const edicao = arquivo.problemasEdicao ?? [];
+      return edicao.length > 0 ? { valid: false, errors: [...edicao, ...tipos.errors] } : tipos;
+    };
     let validacao = await validar();
 
     for (let tentativa = 1; !validacao.valid && tentativa <= maxRepairs; tentativa += 1) {
       console.log(chalk.magenta(`  ▸ ${relativo}: ${validacao.errors.length} problema(s), o Claude está corrigindo (tentativa ${tentativa}/${maxRepairs})…`));
       const correcao = await chamarClaudeJson({
         projectDir,
-        prompt: montarCorrecao(request, relativo, arquivo.conteudo, validacao.errors),
+        prompt: montarCorrecao(request, relativo, arquivo.conteudo, validacao.errors, arquivo.acao === 'create'),
         schema: SCHEMA_CORRECAO,
         tools: ['Read', 'Grep', 'Glob'],
         claude,
@@ -185,7 +224,14 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
         return null;
       });
       if (!correcao) break;
-      arquivo.conteudo = correcao.conteudo;
+      if (arquivo.acao === 'modify' && (correcao.edicoes ?? []).length > 0) {
+        const aplicado = applyEdits(arquivo.conteudo, correcao.edicoes);
+        arquivo.conteudo = aplicado.content;
+        arquivo.problemasEdicao = aplicado.problems;
+      } else if (correcao.conteudo) {
+        arquivo.conteudo = correcao.conteudo;
+        arquivo.problemasEdicao = [];
+      }
       virtualFiles.set(relativo, arquivo.conteudo);
       validacao = await validar();
     }
@@ -221,7 +267,7 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   const services = [...new Set(files.map((file) => workspaceOf(file.path)).filter(Boolean))];
   const filePath = await saveImplementation({
     projectDir,
-    implementation: { kind: 'livre', createdAt: new Date().toISOString(), request, files, migration: null, services },
+    implementation: { kind: 'livre', createdAt: new Date().toISOString(), request, files, migration: null, services, ...(planHash ? { planHash } : {}) },
   });
 
   console.log();

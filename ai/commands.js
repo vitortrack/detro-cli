@@ -8,6 +8,7 @@ import { loadDetroConfig, requireOllama, saveDetroConfig } from './config.js';
 import { applyMigration, findAppScript, findPostgresContainer, restartServices } from './devEnvironment.js';
 import { unifiedDiff } from './diff.js';
 import { planejarLivre } from './livre.js';
+import { criarPlanoGenerico, mostrarPlanoGenerico, pedidoComPlano, validarPlanoGenerico } from './planoGenerico.js';
 import { ajustarPlano, oferecerAjusteClaude } from './ajustePlano.js';
 import { verificarFeature } from './verificacaoFinal.js';
 import { prepareFix } from './fixer.js';
@@ -49,8 +50,9 @@ Uso:
                                   - ajuste de menu: "mova Tipos de ocorrência para Rotas e operação"
                                   - mudança/correção numa tela: "na tela de Paradas, mostrar a coluna código"
 
-  detro plan --livre "<pedido>"   Pedido livre direto ao Claude (lê o projeto, propõe a mudança;
-                                  também é usado quando o pipeline do Ollama não encaixa o pedido)
+  detro plan --livre "<pedido>"   Pula o plano: o Claude lê o projeto e já propõe o código
+                                  (sem --livre, pedido fora dos formatos vira plano genérico:
+                                  arquivos e passos para revisar/ajustar antes do código)
   detro plan -f pedido.md         Idem, lendo de um arquivo (pasta atual, raiz ou .detro/pedidos/).
                                   Aceita lista em tópicos ou documento com seções (## Dados,
                                   ## Restrições...). "somente em memória"/"sem backend" gera
@@ -508,7 +510,7 @@ function printQueryPlan(result) {
 }
 
 function planHashOf(plan) {
-  return sha256(JSON.stringify(plan.spec ?? plan.operation ?? plan.edit));
+  return sha256(JSON.stringify(plan.spec ?? plan.operation ?? plan.edit ?? plan.generic));
 }
 
 function describeOperation(operation) {
@@ -744,6 +746,34 @@ function mostrarProximoPasso(temErro) {
   console.log(chalk.cyan('Próximo passo: detro apply --dry-run  (gera e valida o código, sem escrever no projeto)'));
 }
 
+async function planejarGenerico({ projectDir, config, request, motivo }) {
+  if (motivo) {
+    console.log(chalk.yellow(`  O pedido não encaixa nos formatos do detro (${motivo})`));
+  }
+
+  const generic = await criarPlanoGenerico({ projectDir, config, request });
+  return concluirPlanoGenerico({ projectDir, config, plan: { request, recipe: 'generico', generic }, sempre: true });
+}
+
+async function concluirPlanoGenerico({ projectDir, config, plan, sempre }) {
+  const validacao = await validarPlanoGenerico(projectDir, plan.generic);
+  mostrarPlanoGenerico(plan.generic, validacao);
+
+  const filePath = await saveLastPlan({ projectDir, request: plan.request, recipe: 'generico', generic: plan.generic, createdAt: plan.createdAt });
+  console.log();
+  console.log(chalk.dim(`Plano salvo em: ${filePath}`));
+  console.log(chalk.dim('Para mudar só uma parte do plano: detro plan --ajustar "o que mudar"'));
+  console.log(chalk.yellow('Nenhum arquivo do projeto foi alterado.'));
+
+  const ajuste = await oferecerAjusteClaude({ projectDir, config, plan, errors: validacao.errors, warnings: validacao.warnings, sempre });
+  if (ajuste) {
+    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+  }
+
+  mostrarProximoPasso(validacao.errors.length > 0);
+  return validacao.errors.length > 0 ? 1 : 0;
+}
+
 async function pedirPedidoCompleto({ projectDir, request, motivo }) {
   console.log();
   console.log(chalk.yellow(`  ${motivo}`));
@@ -762,8 +792,10 @@ export async function runPlanCommand({ projectDir, args }) {
   if (args.includes('--ajustar')) {
     const { plan } = await loadLastPlan(projectDir);
 
-    if (!plan.spec || (plan.recipe && plan.recipe !== 'crud')) {
-      throw new Error('O --ajustar funciona com planos de cadastro. Para este plano, edite .detro/last-plan.json e rode detro plan --revalidar.');
+    const generico = plan.recipe === 'generico';
+
+    if (!generico && (!plan.spec || (plan.recipe && plan.recipe !== 'crud'))) {
+      throw new Error('O --ajustar funciona com planos de cadastro e planos genéricos. Para este plano, edite .detro/last-plan.json e rode detro plan --revalidar.');
     }
     if (!process.stdin.isTTY) {
       throw new Error('O --ajustar precisa de um terminal interativo para você escolher as mudanças.');
@@ -771,8 +803,8 @@ export async function runPlanCommand({ projectDir, args }) {
 
     const instrucao = args.filter((arg) => !arg.startsWith('--')).join(' ').trim()
       || await perguntarTexto({ message: 'O que mudar no plano (o resto fica igual)?', required: true });
-    const prepared = await prepareSpec(projectDir, plan.spec, plan.requirements ?? []);
-    const ajuste = await ajustarPlano({ projectDir, config, plan, instrucao, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported });
+    const prepared = generico ? await validarPlanoGenerico(projectDir, plan.generic) : await prepareSpec(projectDir, plan.spec, plan.requirements ?? []);
+    const ajuste = await ajustarPlano({ projectDir, config, plan, instrucao, errors: prepared.errors, warnings: prepared.warnings, unsupported: generico ? [] : prepared.spec.unsupported });
 
     if (!ajuste) return 0;
     return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
@@ -780,6 +812,11 @@ export async function runPlanCommand({ projectDir, args }) {
 
   if (args.includes('--revalidar')) {
     const { filePath, plan } = await loadLastPlan(projectDir);
+
+    if (plan.recipe === 'generico') {
+      console.log(chalk.cyan.bold('DETRO PLAN — revalidação (plano genérico)'));
+      return concluirPlanoGenerico({ projectDir, config, plan, sempre: false });
+    }
 
     if (plan.recipe === 'page') {
       console.log(chalk.cyan.bold('DETRO PLAN — revalidação (tela sob medida)'));
@@ -886,7 +923,7 @@ export async function runPlanCommand({ projectDir, args }) {
     progress.clear();
     if (error.code === 'PEDIDO_INCOMPLETO') return pedirPedidoCompleto({ projectDir, request, motivo: error.message });
     if (!claudeLigado) throw error;
-    return planejarLivre({ projectDir, config, request, motivo: error.message, printDiff });
+    return planejarGenerico({ projectDir, config, request, motivo: error.message });
   }
 
   progress.clear();
@@ -971,7 +1008,7 @@ export async function runPlanCommand({ projectDir, args }) {
   }
 
   if (result.blocked && claudeLigado) {
-    return planejarLivre({ projectDir, config, request, motivo: result.message, printDiff });
+    return planejarGenerico({ projectDir, config, request, motivo: result.message });
   }
 
   if (result.blocked) {
@@ -1051,6 +1088,10 @@ async function runDryRun(projectDir, args) {
 
   if (plan.recipe === 'edit') {
     return prepareEditImplementation(projectDir, config, plan, progress);
+  }
+
+  if (plan.recipe === 'generico') {
+    return planejarLivre({ projectDir, config, request: pedidoComPlano(plan.request, plan.generic), printDiff, planHash: planHashOf(plan) });
   }
 
   const generate = { query: generateQuery, example: generateByExample, page: generatePage }[plan.recipe] ?? generateCrud;

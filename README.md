@@ -58,6 +58,20 @@ Proposta de `detro plan --livre` ou `detro fix` vai direto para `detro apply`, s
 detro check                             # tipos + regras nos arquivos alterados
 ```
 
+### Plano genérico (pedidos fora dos formatos)
+
+Relatório, integração, ajuste espalhado por várias telas: o que não é cadastro, tela, consulta ou
+menu vira **plano genérico**. O Claude lê o projeto e devolve, sem escrever código, o que entendeu,
+cada arquivo a criar ou alterar (e o que muda nele), os passos, os riscos e o que fica a confirmar.
+O mesmo fluxo dos cadastros vale aqui:
+
+```bash
+detro plan "relatório com o total de viagens por linha no mês, no menu Relatórios"
+detro plan --ajustar "sem gráfico; período obrigatório, abrindo no mês atual"
+detro apply --dry-run     # o Claude implementa exatamente o plano aprovado; tipos checados
+detro apply
+```
+
 ### Ajustar e revalidar o plano
 
 O `detro plan` salva o plano em `.detro/last-plan.json`. Para ajustar sem gerar de novo:
@@ -102,7 +116,7 @@ Com `claude.enabled: false` ou fora de um terminal interativo (CI, pipe), o menu
 | Toda resposta do Ollama (`revisar: true`) | O Claude revisa e corrige; sugestões aparecem com `✎ claude:` |
 | O Ollama erra `afterAttempts` vezes seguidas | A tentativa seguinte vai direto para o Claude |
 | O Ollama cai, estoura o tempo ou devolve JSON inválido | O Claude assume |
-| O pipeline não encaixa o pedido | Modo livre: o Claude lê o projeto (só leitura) e propõe a mudança com diff |
+| O pipeline não encaixa o pedido | Plano genérico: o Claude lê o projeto (só leitura) e devolve o plano (arquivos, passos, riscos) para você revisar; o código só sai no `apply --dry-run`, seguindo o plano aprovado |
 | Fim do `detro apply --dry-run` | Verificação final: o Claude confere a coerência entre todos os arquivos da feature (nomes, rotas, tipos, permissões, menu). As correções só entram se **todas** passarem nos tipos juntas; problemas que já existiam no projeto viram sugestões `Já existia:` em vez de alterações |
 
 O Claude roda sem ferramentas de escrita (`--tools ""` ou só Read/Grep/Glob no modo livre) e com
@@ -156,13 +170,15 @@ O modo é escolhido pelo que `detro ai perfil` encontra no projeto (ou forçado 
 | Modo | Quando | Como |
 |---|---|---|
 | **Criação por exemplo** | Projetos TypeScript em geral (Express, NestJS, Next.js, React…) | Acha uma feature que já existe no projeto e copia o padrão dela para a nova (ex.: `users` → `products`) |
-| **Modo livre** | Qualquer stack, ou quando não há feature modelo | O Claude lê o projeto e propõe a mudança completa |
+| **Plano genérico** | Pedido fora dos formatos (relatório, integração, ajuste em várias telas…), qualquer stack, ou quando não há feature modelo | O Claude monta o plano; você revisa/ajusta; o `apply --dry-run` gera o código seguindo o plano, com checagem de tipos |
 | **Preset NestJS multi-tenant** | Só quando o projeto tem todas as convenções do preset | Templates prontos para cadastro, consulta, tela e menu |
 
-`"geracao": "exemplo"` desliga o preset mesmo que o projeto o atenda; `"geracao": "livre"` manda tudo para o Claude.
+`"geracao": "exemplo"` desliga o preset mesmo que o projeto o atenda; `"geracao": "livre"` manda tudo para o plano genérico.
+`detro plan --livre "<pedido>"` pula o plano e pede o código direto ao Claude.
 
 ## Limites conhecidos
 
-- A criação por exemplo precisa de pelo menos uma feature com arquivos em mais de uma camada; sem ela, o pedido vai para o modo livre.
+- A criação por exemplo precisa de pelo menos uma feature com arquivos em mais de uma camada; sem ela, o pedido vira plano genérico.
+- O plano genérico não tem template: tipos são checados, mas regras do projeto (permissão, operadora, fuso) dependem do Claude seguir os CLAUDE.md. Revise o plano antes do dry-run.
 - Arquivos que não são TypeScript não passam por checagem de tipos: revise o diff antes do `detro apply`.
 - O preset NestJS multi-tenant só é usado em projetos com as convenções dele (`detro ai perfil` lista quais).
