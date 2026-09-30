@@ -30,7 +30,13 @@ bash ./detro.sh install   # npm install + npm link + autocompletar do bash
 
 Rode a partir da raiz do projeto (a pasta com `.detro/`, `.git` ou `package.json`).
 
+Comece pelo perfil: o detro detecta a stack do projeto sozinho a cada comando e manda esse resumo
+junto com todo pedido, para o Ollama e para o Claude. O `detro ai perfil` mostra exatamente o que os
+modelos vão receber. Se faltar algo, preencha `projeto.nome` e `projeto.descricao` em
+`.detro/config.json`: os dois também entram no contexto (ver [Detecção de stack](#detecção-de-stack)).
+
 ```bash
+detro ai perfil                         # stack, convenções e o que o detro sabe gerar aqui
 detro ai status                         # Ollama, modelo e contexto
 detro plan "cadastro de garagens com nome e endereço"
 detro plan --livre "no modal X, trocar o título A por B"
