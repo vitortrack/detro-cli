@@ -39,6 +39,37 @@ detro apply                             # escreve o que o dry-run mostrou
 detro check                             # tipos + regras nos arquivos alterados
 ```
 
+### Ajustar e revalidar o plano
+
+O `detro plan` salva o plano em `.detro/last-plan.json`. Para ajustar sem gerar de novo:
+
+```bash
+# edite .detro/last-plan.json (entity, route, fields, menu, permissão...) e depois:
+detro plan --revalidar                  # valida o plano salvo e mostra o resultado
+```
+
+Em cadastros, quando o plano (novo ou revalidado) tem **erros**, **avisos** ou itens **não cobertos**,
+o detro pergunta o que fazer:
+
+| Opção | O que acontece |
+|---|---|
+| Perguntar ao Claude a melhor solução | O Claude lê o projeto (só leitura) e devolve análise, o que **manter** e as **mudanças** propostas, numeradas e com motivo |
+| Reformular o pedido | Você edita o texto do pedido e o detro interpreta tudo de novo |
+| Seguir com o plano como está | Nada muda; siga com `detro apply --dry-run` ou edite o JSON |
+
+Depois da resposta do Claude:
+
+| Opção | O que acontece |
+|---|---|
+| Aplicar todas as mudanças e revalidar | Salva o plano ajustado e roda `--revalidar` sozinho |
+| Escolher quais mudanças aplicar | Espaço marca/desmarca; o Claude refaz o plano só com as marcadas e mostra de novo |
+| Orientar o Claude | Texto livre ("cidade como texto livre", "mantenha o nome Mechanic") e ele responde de novo |
+| Reformular o pedido | Mesmo que acima |
+| Manter o plano como estava | Sai sem alterar o `.detro/last-plan.json` |
+
+O ciclo se repete a cada revalidação até o plano ficar limpo ou você escolher seguir/manter.
+Com `claude.enabled: false` ou fora de um terminal interativo (CI, pipe), o menu não aparece.
+
 ### Como o Claude participa
 
 | Quando | O que acontece |
