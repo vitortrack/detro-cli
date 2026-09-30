@@ -932,6 +932,10 @@ export async function runPlanCommand({ projectDir, args }) {
     return result.preview.errors.length > 0 ? 1 : 0;
   }
 
+  if (result.incompleto) {
+    return pedirPedidoCompleto({ projectDir, request, motivo: result.message });
+  }
+
   if (result.blocked && claudeLigado) {
     return planejarLivre({ projectDir, config, request, motivo: result.message, printDiff });
   }

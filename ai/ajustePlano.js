@@ -25,7 +25,7 @@ function montarPrompt({ plan, errors, warnings, unsupported, contexto, orientaca
   return [
     contexto ?? '',
     'O gerador "detro" montou o plano de um cadastro CRUD neste repositório e a validação apontou os itens abaixo.',
-    'Você só tem ferramentas de LEITURA: explore o código com Read/Grep/Glob e siga os CLAUDE.md (raiz, api/, web/, .claude/, db/). Leia só o necessário para decidir.',
+    'Os ERROS abaixo já dizem onde está cada conflito (arquivo e motivo). Decida a partir deles e do SPEC; leia no máximo 3 arquivos, e só se precisar confirmar algo. Não explore o repositório.',
     'Descubra se o conflito é um cadastro que já existe (então o plano deve ser outro nome ou nem ser feito) ou só colisão de nome, e proponha a melhor solução.',
     'Devolva: "analise" (2 a 4 frases em pt-BR), "manter" (o que do plano atual está certo e deve ficar),',
     '"mudancas" (cada troca proposta, independente das outras, com "descricao" curta e "motivo"),',
@@ -45,14 +45,24 @@ function montarPrompt({ plan, errors, warnings, unsupported, contexto, orientaca
   ].join('\n');
 }
 
+const LIMITE_AJUSTE_MS = 180000;
+
 async function perguntarAoClaude({ projectDir, config, orientacao, ...contexto }) {
-  console.log(chalk.magenta('▸ O Claude está lendo o projeto e o plano… (pode levar alguns minutos)'));
-  const resposta = await chamarClaudeJson({
+  const claude = config.ai.ollama.claude ?? {};
+  const pedir = (tools) => chamarClaudeJson({
     projectDir,
     prompt: montarPrompt({ ...contexto, contexto: config.ai.ollama.projectContext, orientacao }),
     schema: SCHEMA,
-    tools: ['Read', 'Grep', 'Glob'],
-    claude: config.ai.ollama.claude ?? {},
+    tools,
+    claude: { ...claude, timeoutMs: Math.min(claude.timeoutMs ?? LIMITE_AJUSTE_MS, LIMITE_AJUSTE_MS) },
+    esforco: 'low',
+  });
+
+  console.log(chalk.magenta('▸ O Claude está analisando o plano…'));
+  const resposta = await pedir(['Read', 'Grep', 'Glob']).catch((error) => {
+    console.log(chalk.yellow(`  ${error.message}`));
+    console.log(chalk.magenta('▸ Tentando de novo só com o plano e os erros, sem ler o projeto…'));
+    return pedir([]);
   });
 
   try {

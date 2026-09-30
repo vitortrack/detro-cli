@@ -66,7 +66,7 @@ function montarCorrecao(request, relativo, conteudo, erros) {
   ].join('\n');
 }
 
-export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude }) {
+export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco }) {
   const args = [
     '-p',
     ...(tools.length > 0 ? ['--tools', ...tools, '--allowedTools', ...tools] : ['--tools', '']),
@@ -76,6 +76,7 @@ export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claud
     '--setting-sources', 'project',
   ];
   if (claude.model) args.push('--model', claude.model);
+  if (esforco) args.push('--effort', esforco);
 
   const env = { ...process.env };
   if (!claude.usarApiKey) delete env.ANTHROPIC_API_KEY;

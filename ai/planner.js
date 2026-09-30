@@ -241,7 +241,7 @@ export async function createPlan({ projectDir, config, request, onProgress, onSt
   const intentMessage = describeIntent(analysis.intent);
 
   if (intentMessage) {
-    return { blocked: true, analysis, message: intentMessage };
+    return { blocked: true, analysis, message: intentMessage, incompleto: analysis.intent === 'vago' };
   }
 
   const specialized = analysis.scope === 'frontend' ? profile.capabilities.frontend : profile.capabilities.fullstack;

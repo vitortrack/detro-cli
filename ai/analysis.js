@@ -124,7 +124,7 @@ export function analyzeRequest(request) {
   const frontendOnly = [
     /\b(somente|apenas|so)\s+(em\s+|no\s+)?(memoria|estado local|front ?end)\b/,
     /\b(permanecer|ficar|manter)\s+(somente\s+|apenas\s+)?(em|no)\s+(memoria|estado local)\b/,
-    /\b(nao (e necessario |precisa |deve )?criar|sem)\b[^.\n]{0,80}\b(backend|api|migration|banco de dados|endpoint|integracao http)\b/,
+    /\b(nao (e necessario |precisa |deve )?(criar|persistir|gravar|salvar)|sem)\b[^.\n]{0,80}\b(backend|api|migrations?|banco( de dados)?|endpoints?|integracao http|persistir|persistencia)\b/,
     /\bnao criar\s*:?[\s\S]{0,300}\b(backend|controller|migration|chamadas http)\b/,
   ].some((pattern) => pattern.test(lower));
 
