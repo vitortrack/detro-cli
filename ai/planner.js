@@ -266,7 +266,7 @@ export async function createPlan({ projectDir, config, request, onProgress, onSt
   const { requirements } = extracted;
 
   if (requirements.length === 0) {
-    throw new Error('Não consegui separar o pedido em requisitos. Descreva o cadastro e os dados, ex.: "cadastro de garagens com nome, endereço e capacidade".');
+    throw Object.assign(new Error('Não consegui separar o pedido em requisitos. Descreva o cadastro e os dados, ex.: "cadastro de garagens com nome, endereço e capacidade".'), { code: 'PEDIDO_INCOMPLETO' });
   }
 
   onStage(`Montando a especificação (${requirements.length} requisitos)`);

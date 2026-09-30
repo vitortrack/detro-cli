@@ -1,4 +1,4 @@
-import { confirm } from '@inquirer/prompts';
+import { confirm, input as perguntarTexto } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import { readdir, readFile, writeFile } from 'node:fs/promises';
@@ -736,6 +736,18 @@ async function readRequestInput(args, projectDir) {
   return requireText(args.filter((arg) => !arg.startsWith('--')), 'detro plan "cadastro de reservatórios com nome, capacidade em litros e ativo"  (ou: detro plan -f pedido.md)');
 }
 
+async function pedirPedidoCompleto({ projectDir, request, motivo }) {
+  console.log();
+  console.log(chalk.yellow(`  ${motivo}`));
+
+  if (!process.stdin.isTTY) return 1;
+
+  const novo = await perguntarTexto({ message: 'Pedido com os dados do cadastro (vazio cancela):', default: request });
+  if (!novo.trim() || novo.trim() === request.trim()) return 1;
+
+  return runPlanCommand({ projectDir, args: [novo] });
+}
+
 export async function runPlanCommand({ projectDir, args }) {
   const config = await loadDetroConfig(projectDir);
 
@@ -838,6 +850,7 @@ export async function runPlanCommand({ projectDir, args }) {
     });
   } catch (error) {
     progress.clear();
+    if (error.code === 'PEDIDO_INCOMPLETO') return pedirPedidoCompleto({ projectDir, request, motivo: error.message });
     if (!claudeLigado) throw error;
     return planejarLivre({ projectDir, config, request, motivo: error.message, printDiff });
   }
