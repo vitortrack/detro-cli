@@ -738,6 +738,12 @@ async function readRequestInput(args, projectDir) {
   return requireText(args.filter((arg) => !arg.startsWith('--')), 'detro plan "cadastro de reservatórios com nome, capacidade em litros e ativo"  (ou: detro plan -f pedido.md)');
 }
 
+function mostrarProximoPasso(temErro) {
+  if (temErro) return;
+  console.log();
+  console.log(chalk.cyan('Próximo passo: detro apply --dry-run  (gera e valida o código, sem escrever no projeto)'));
+}
+
 async function pedirPedidoCompleto({ projectDir, request, motivo }) {
   console.log();
   console.log(chalk.yellow(`  ${motivo}`));
@@ -780,6 +786,7 @@ export async function runPlanCommand({ projectDir, args }) {
       const prepared = await preparePageSpec(projectDir, plan.spec);
       printPagePlan({ spec: prepared.spec, evidence: plan.evidence ?? [], errors: prepared.errors, warnings: [] });
       await saveLastPlan({ projectDir, request: plan.request, recipe: 'page', spec: prepared.spec, evidence: plan.evidence });
+      mostrarProximoPasso(prepared.errors.length > 0);
       return prepared.errors.length > 0 ? 1 : 0;
     }
 
@@ -788,6 +795,7 @@ export async function runPlanCommand({ projectDir, args }) {
       const preview = await planExampleFiles(projectDir, plan.example, plan.spec);
       printExamplePlan({ spec: plan.spec, example: plan.example, newFiles: preview.files, errors: preview.errors, warnings: [], alternatives: [] });
       await saveLastPlan({ projectDir, request: plan.request, recipe: 'example', spec: plan.spec, requirements: plan.requirements, example: plan.example });
+      mostrarProximoPasso(preview.errors.length > 0);
       return preview.errors.length > 0 ? 1 : 0;
     }
 
@@ -800,6 +808,7 @@ export async function runPlanCommand({ projectDir, args }) {
         await saveLastPlan({ projectDir, request: plan.request, recipe: 'query', spec: prepared.spec });
       }
 
+      mostrarProximoPasso(prepared.errors.length > 0);
       return prepared.errors.length > 0 ? 1 : 0;
     }
 
@@ -808,6 +817,7 @@ export async function runPlanCommand({ projectDir, args }) {
       console.log(`  Arquivo: ${plan.edit.file}`);
       console.log(`  Pedido: ${plan.edit.instructions}`);
       await saveLastPlan({ projectDir, request: plan.request, recipe: 'edit', edit: plan.edit });
+      mostrarProximoPasso(false);
       return 0;
     }
 
@@ -818,6 +828,7 @@ export async function runPlanCommand({ projectDir, args }) {
       await saveLastPlan({ projectDir, request: plan.request, recipe: 'menu', operation: plan.operation });
       console.log();
       console.log(chalk.dim(`Plano: ${filePath}`));
+      mostrarProximoPasso(preview.errors.length > 0);
       return preview.errors.length > 0 ? 1 : 0;
     }
 
@@ -841,6 +852,7 @@ export async function runPlanCommand({ projectDir, args }) {
       return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
     }
 
+    mostrarProximoPasso(prepared.errors.length > 0);
     return prepared.errors.length > 0 ? 1 : 0;
   }
 
