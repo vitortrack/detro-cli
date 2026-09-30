@@ -1,7 +1,7 @@
 {
   "name": "@vitortrack777/detro",
   "version": "0.1.5",
-  "description": "CLI de desenvolvimento com IA: gera e corrige código com Ollama, revisado e completado pelo Claude Code",
+  "description": "detro CLI: CLI de desenvolvimento com IA que gera CRUDs completos (banco, API e tela) e corrige código com Ollama, revisado pelo Claude Code. NestJS, React, TypeScript e PostgreSQL.",
   "type": "module",
   "bin": {
     "detro": "./index.js"
@@ -28,12 +28,25 @@
     "LICENSE"
   ],
   "keywords": [
+    "detro",
+    "detro-cli",
     "cli",
+    "ai",
+    "ia",
+    "llm",
     "ollama",
     "claude",
+    "claude-code",
+    "codegen",
+    "code-generator",
+    "crud-generator",
+    "gerador-de-crud",
+    "gerador-de-codigo",
+    "scaffolding",
     "nestjs",
     "react",
-    "codegen"
+    "typescript",
+    "postgresql"
   ],
   "author": "vitortrack",
   "repository": {

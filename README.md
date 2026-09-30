@@ -1,6 +1,14 @@
-# detro
+# detro CLI — gerador de CRUD e código com IA (Ollama + Claude Code)
 
-`npm install -g @vitortrack777/detro` — o comando instalado é `detro`.
+**detro** é um CLI de desenvolvimento com IA: a partir de um pedido em português, gera um CRUD
+completo (migration PostgreSQL, API NestJS e tela React) e corrige código existente, com o Ollama
+rodando local e o Claude Code revisando.
+
+```bash
+npm install -g @vitortrack777/detro     # o comando instalado é detro
+detro plan "cadastro de garagens com nome e endereço"
+detro apply
+```
 
 CLI de desenvolvimento com IA para projetos TypeScript (NestJS em `api/`, React em `web/`).
 O Ollama gera o código localmente; o Claude Code revisa, corrige e assume quando o Ollama erra.
