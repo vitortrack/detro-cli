@@ -57,7 +57,8 @@ Uso:
                                   só o frontend; nomes, título, botão e ações pedidos são seguidos.
   detro plan --revalidar          Revalida o plano depois de editar o JSON à mão
   detro apply --dry-run           Gera e valida o código, sem escrever no projeto
-  detro apply                     Escreve o que o último dry-run (ou fix) preparou e oferece
+              --descartar                   sobrescreve uma proposta do --livre/fix ainda não aplicada
+  detro apply                     Escreve o que o último dry-run (ou fix/--livre) preparou e oferece
                                   aplicar a migration no banco de dev e rebuildar api/web
   detro apply --sim               Idem, aceitando os passos sem perguntar
               --sem-banco / --sem-restart   pula a migration ou o rebuild
@@ -978,9 +979,14 @@ function printGeneratedPreview(files) {
   }
 }
 
-async function runDryRun(projectDir) {
+async function runDryRun(projectDir, args) {
   const config = await loadDetroConfig(projectDir);
   const { filePath, plan } = await loadLastPlan(projectDir);
+  const pendente = await loadImplementation(projectDir).then(({ implementation }) => implementation).catch(() => null);
+
+  if (pendente && !pendente.appliedAt && !pendente.planHash && !args.includes('--descartar')) {
+    throw new Error(`Há uma proposta "${pendente.kind}" pendente (${pendente.createdAt}) que não veio do plano: "${String(pendente.request).slice(0, 120)}". O dry-run gera a partir do plano (${plan.request.slice(0, 80)}) e sobrescreveria essa proposta. Aplique-a com: detro apply — ou descarte-a com: detro apply --dry-run --descartar`);
+  }
   const progress = createProgress();
 
   console.log(chalk.cyan.bold('DETRO APPLY — DRY RUN'));
@@ -1052,7 +1058,7 @@ async function runDryRun(projectDir) {
 
 export async function runApplyCommand({ projectDir, args }) {
   if (args.includes('--dry-run')) {
-    return runDryRun(projectDir);
+    return runDryRun(projectDir, args);
   }
 
   const { filePath, implementation } = await loadImplementation(projectDir);

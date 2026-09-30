@@ -42,6 +42,11 @@ detro plan "cadastro de garagens com nome e endereço"
 detro plan --livre "no modal X, trocar o título A por B"
 detro apply --dry-run                   # gera e valida, sem escrever
 detro apply                             # escreve o que o dry-run mostrou
+```
+
+Proposta de `detro plan --livre` ou `detro fix` vai direto para `detro apply`, sem `--dry-run`: o dry-run gera a partir do plano salvo e recusa sobrescrever uma proposta pendente (use `--descartar` para jogá-la fora).
+
+```bash
 detro check                             # tipos + regras nos arquivos alterados
 ```
 

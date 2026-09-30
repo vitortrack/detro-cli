@@ -40,6 +40,28 @@ function montarPedido(request, contexto) {
   ].join('\n');
 }
 
+const SCHEMA_CORRECAO = {
+  type: 'object',
+  properties: { conteudo: { type: 'string' } },
+  required: ['conteudo'],
+};
+
+function montarCorrecao(request, relativo, conteudo, erros) {
+  return [
+    `Você propôs o arquivo ${relativo} para o pedido abaixo, mas ele não passou na validação do projeto.`,
+    'Você só tem ferramentas de LEITURA. Corrija SOMENTE os problemas listados, sem mudar o resto, e devolva o conteúdo COMPLETO final em "conteudo".',
+    '',
+    'PROBLEMAS:',
+    ...erros.map((erro) => `- ${erro}`),
+    '',
+    'CONTEÚDO ATUAL:',
+    conteudo,
+    '',
+    'PEDIDO ORIGINAL:',
+    request,
+  ].join('\n');
+}
+
 export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude }) {
   const args = [
     '-p',
@@ -86,22 +108,26 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
     console.log(chalk.yellow(`  O pipeline do Ollama não encaixou o pedido (${motivo})`));
   }
   console.log(chalk.magenta('▸ Modo livre: o Claude está lendo o projeto e preparando a mudança…'));
+  const claude = config.ai.ollama.claude ?? {};
 
   const proposta = await chamarClaudeJson({
     projectDir,
     prompt: montarPedido(request, config.ai.ollama.projectContext),
     schema: SCHEMA,
     tools: ['Read', 'Grep', 'Glob'],
-    claude: config.ai.ollama.claude ?? {},
+    claude,
   });
   const files = [];
   let comProblema = 0;
+  const maxRepairs = config.ai.generation.maxRepairs ?? 2;
+  const normalizar = (caminho) => path.normalize(caminho).replace(/^(\.\.[/\\])+/, '');
+  const virtualFiles = new Map(proposta.arquivos.map((arquivo) => [normalizar(arquivo.path), arquivo.conteudo]));
 
   console.log();
   console.log(chalk.cyan.bold(proposta.resumo));
 
   for (const arquivo of proposta.arquivos) {
-    const relativo = path.normalize(arquivo.path).replace(/^(\.\.[/\\])+/, '');
+    const relativo = normalizar(arquivo.path);
     const absoluto = path.join(projectDir, relativo);
     const original = arquivo.acao === 'modify' ? await readFile(absoluto, 'utf8').catch(() => null) : null;
 
@@ -112,9 +138,28 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
     }
 
     const tipado = /\.(ts|tsx)$/.test(relativo);
-    const validacao = tipado
-      ? await validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo, original })
-      : { valid: true, errors: [] };
+    const validar = () => (tipado
+      ? validateFile({ projectDir, relativePath: relativo, content: arquivo.conteudo, original, virtualFiles })
+      : { valid: true, errors: [] });
+    let validacao = await validar();
+
+    for (let tentativa = 1; !validacao.valid && tentativa <= maxRepairs; tentativa += 1) {
+      console.log(chalk.magenta(`  ▸ ${relativo}: ${validacao.errors.length} problema(s), o Claude está corrigindo (tentativa ${tentativa}/${maxRepairs})…`));
+      const correcao = await chamarClaudeJson({
+        projectDir,
+        prompt: montarCorrecao(request, relativo, arquivo.conteudo, validacao.errors),
+        schema: SCHEMA_CORRECAO,
+        tools: ['Read', 'Grep', 'Glob'],
+        claude,
+      }).catch((error) => {
+        console.log(chalk.yellow(`    A correção falhou: ${error.message}`));
+        return null;
+      });
+      if (!correcao) break;
+      arquivo.conteudo = correcao.conteudo;
+      virtualFiles.set(relativo, arquivo.conteudo);
+      validacao = await validar();
+    }
 
     console.log();
     console.log(chalk.white.bold(`${arquivo.acao === 'create' ? '+' : '~'} ${relativo}`) + (!tipado ? chalk.dim('  (sem checagem de tipos — revise o diff)') : validacao.valid ? chalk.green('  ✓ tipos ok') : chalk.red('  ✗ com problemas')));
