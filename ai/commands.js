@@ -801,8 +801,9 @@ export async function runPlanCommand({ projectDir, args }) {
     console.log();
     console.log(chalk.dim(`Plano: ${filePath}`));
 
-    if (await oferecerAjusteClaude({ projectDir, config, plan, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported })) {
-      return runPlanCommand({ projectDir, args: ['--revalidar'] });
+    const ajuste = await oferecerAjusteClaude({ projectDir, config, plan, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported });
+    if (ajuste) {
+      return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
     }
 
     return prepared.errors.length > 0 ? 1 : 0;
@@ -939,8 +940,9 @@ export async function runPlanCommand({ projectDir, args }) {
   console.log(chalk.dim('Ajuste campos, rótulos, rota ou permissão editando o JSON e rode "detro plan --revalidar".'));
   console.log(chalk.yellow('Nenhum arquivo do projeto foi alterado.'));
 
-  if (await oferecerAjusteClaude({ projectDir, config, plan: { request, spec: result.spec, requirements: result.requirements }, errors: result.errors, warnings: result.warnings, unsupported: result.spec.unsupported })) {
-    return runPlanCommand({ projectDir, args: ['--revalidar'] });
+  const ajuste = await oferecerAjusteClaude({ projectDir, config, plan: { request, spec: result.spec, requirements: result.requirements }, errors: result.errors, warnings: result.warnings, unsupported: result.spec.unsupported });
+  if (ajuste) {
+    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
   }
 
   if (result.errors.length === 0) {
