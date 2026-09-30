@@ -28,10 +28,14 @@ const SCHEMA = {
   required: ['resumo', 'arquivos', 'sugestoes'],
 };
 
-function montarPedido(request, contexto) {
+const FOCO_NORMAL = 'Seja objetivo na leitura: os CLAUDE.md, um recurso parecido já existente como modelo e os arquivos onde ele é registrado (rotas, menu, módulos). Não varra o repositório.';
+const FOCO_ENXUTO = 'A tentativa anterior demorou demais. Leia no máximo 5 arquivos (um modelo parecido e onde ele é registrado) e entregue a versão MÍNIMA que atende o pedido: prefira criar arquivos novos e altere arquivos existentes só para registrar a tela (rota, menu). O que ficar de fora vai em "sugestoes".';
+
+function montarPedido(request, contexto, foco = FOCO_NORMAL) {
   return [
     contexto ?? '',
     'Você está implementando um pedido neste repositório. Você só tem ferramentas de LEITURA: explore o código com Read/Grep/Glob e siga os CLAUDE.md (raiz, api/, web/, .claude/).',
+    foco,
     'Não escreva arquivos. Devolva a mudança como proposta: para cada arquivo criado ou alterado, o conteúdo COMPLETO final em "conteudo" e o caminho relativo à raiz em "path".',
     'Mexa só no necessário para o pedido funcionar. Em "resumo", uma frase do que muda; em "sugestoes", até 5 observações curtas em pt-BR (vazio se não houver).',
     '',
@@ -80,16 +84,35 @@ export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claud
     const child = spawn('claude', args, { cwd: projectDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
-    const timer = setTimeout(() => child.kill('SIGTERM'), claude.timeoutMs ?? 600000);
+    const limiteMs = claude.timeoutMs ?? 600000;
+    const inicio = Date.now();
+    let estourou = false;
+    const timer = setTimeout(() => {
+      estourou = true;
+      parar();
+      child.kill('SIGTERM');
+      child.stdout.destroy();
+      child.stderr.destroy();
+      reject(Object.assign(new Error(`O Claude passou de ${Math.round(limiteMs / 60000)} min sem terminar (ajuste ai.ollama.claude.timeoutMs em .detro/config.json se precisar de mais tempo).`), { code: 'CLAUDE_TIMEOUT' }));
+    }, limiteMs);
+    const aviso = process.stdout.isTTY
+      ? setInterval(() => console.log(chalk.dim(`  … o Claude está trabalhando há ${Math.round((Date.now() - inicio) / 60000)} min (limite ${Math.round(limiteMs / 60000)} min)`)), 60000)
+      : null;
+    const parar = () => {
+      clearTimeout(timer);
+      if (aviso) clearInterval(aviso);
+    };
 
     child.stdout.on('data', (chunk) => { out += chunk; });
     child.stderr.on('data', (chunk) => { err += chunk; });
     child.on('error', (error) => {
-      clearTimeout(timer);
+      parar();
+      if (estourou) return;
       reject(new Error(`Não foi possível executar o Claude Code (${error.message}).`));
     });
     child.on('close', (code) => {
-      clearTimeout(timer);
+      parar();
+      if (estourou) return;
       try {
         const data = JSON.parse(out);
         if (data.is_error) throw new Error(String(data.result ?? ''));
@@ -110,12 +133,17 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   console.log(chalk.magenta('▸ Modo livre: o Claude está lendo o projeto e preparando a mudança…'));
   const claude = config.ai.ollama.claude ?? {};
 
-  const proposta = await chamarClaudeJson({
+  const pedir = (foco) => chamarClaudeJson({
     projectDir,
-    prompt: montarPedido(request, config.ai.ollama.projectContext),
+    prompt: montarPedido(request, config.ai.ollama.projectContext, foco),
     schema: SCHEMA,
     tools: ['Read', 'Grep', 'Glob'],
     claude,
+  });
+  const proposta = await pedir(FOCO_NORMAL).catch((error) => {
+    console.log(chalk.yellow(`  ${error.message}`));
+    console.log(chalk.magenta('▸ Tentando de novo com uma versão mínima do pedido…'));
+    return pedir(FOCO_ENXUTO);
   });
   const files = [];
   let comProblema = 0;
