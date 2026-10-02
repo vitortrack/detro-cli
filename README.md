@@ -28,6 +28,7 @@ detro apply
 - [Requisitos](#requisitos)
 - [Instalação](#instalação)
 - [Tutorial: do zero num projeto de teste](#tutorial-do-zero-num-projeto-de-teste)
+- [Projeto do zero: dando um modelo para o Ollama copiar](#projeto-do-zero-dando-um-modelo-para-o-ollama-copiar)
 - [Como a IA funciona](#como-a-ia-funciona)
   - [O ciclo plan → dry-run → apply](#o-ciclo-plan--dry-run--apply)
   - [Contexto: o que os modelos recebem](#contexto-o-que-os-modelos-recebem)
@@ -228,7 +229,7 @@ O que ajustar para o seu projeto:
 | Chave | Como preencher |
 |---|---|
 | `projeto.descricao` | Uma frase: o domínio, a stack e as regras que valem para tudo. Vai em **toda** chamada |
-| `references.formModal` / `references.page` | Um modal e uma página que já existem e têm o visual que você quer copiar. Caminho relativo à raiz |
+| `references.formModal` / `references.page` | Só no preset: um modal e uma página que já existem, com o visual que você quer copiar. Caminho relativo à raiz. Na criação por exemplo, quem dá o visual é a feature modelo |
 | `database.container` | Deixe `null` se só houver um PostgreSQL no Docker. Com mais de um, ponha o nome (`docker ps`) |
 | `ollama.model` | O modelo que você baixou. Na dúvida, `detro ai models` |
 | `claude.usarApiKey` | Deixe `false` para usar a assinatura do Claude Code e não a API paga |
@@ -338,6 +339,253 @@ detro apply                         # 6. escreve, migration, rebuild
 detro check                         # 7. revisão final
 ```
 
+## Projeto do zero: dando um modelo para o Ollama copiar
+
+### Por que um projeto vazio não funciona com o Ollama
+
+O detro **nunca** pede ao Ollama "crie um cadastro do zero". Um modelo local de 7B–14B não tem
+como adivinhar a sua arquitetura e erraria imports, nomes e padrões. Em vez disso, o Ollama sempre
+recebe algo pronto para **adaptar**:
+
+| Modo | O que o Ollama recebe pronto | De onde vem |
+|---|---|---|
+| Criação por exemplo | Os arquivos de uma feature do **seu** projeto, já com o nome da entidade trocado | Uma feature escrita por você (ou pelo Claude) |
+| Preset NestJS multi-tenant | Templates internos do detro, mais a sua tela e o seu modal de referência | `ai/templates/` do pacote + `references` + `web/src/components/` |
+
+Num projeto vazio não há nenhuma das duas coisas. O `detro plan` responde:
+
+```
+Não achei nenhuma feature com arquivos em mais de uma camada para usar de modelo.
+Crie a primeira feature à mão; o detro passa a copiar o padrão dela.
+```
+
+e, com o Claude ligado, o pedido vai para o [plano genérico](#plano-genérico). Funciona, mas é o
+Claude fazendo tudo, sem template e com mais custo e variação.
+
+**A solução é montar a base uma vez:** uma feature modelo completa, um `CLAUDE.md` e o
+`.detro/config.json`. A partir daí, o Ollama passa a copiar o seu padrão.
+
+### Caminho recomendado
+
+```
+1. esqueleto do projeto (api/ + web/ + db/)   → você (ou o gerador oficial do framework)
+2. CLAUDE.md com as regras                    → você
+3. .detro/config.json                         → você
+4. a PRIMEIRA feature, completa               → Claude (plano genérico) ou à mão, revisada por você
+5. da segunda em diante                       → Ollama copiando a primeira
+```
+
+### Passo 1 — O esqueleto
+
+Use o gerador oficial de cada framework, para o detro detectar a stack pelos `package.json`:
+
+```bash
+mkdir meu-sistema && cd meu-sistema && git init
+
+npx @nestjs/cli new api --package-manager npm --skip-git
+npm create vite@latest web -- --template react-ts
+(cd web && npm install)
+
+mkdir -p db/init
+```
+
+Se usar Docker, um `docker-compose.yml` na raiz com o banco faz o `perfil` detectar a infra:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: meu_sistema
+    ports: ["5432:5432"]
+    volumes: ["./db/init:/docker-entrypoint-initdb.d"]
+```
+
+Confira:
+
+```bash
+detro ai perfil     # deve listar NestJS, React, Vite, PostgreSQL e os dois projetos TypeScript
+```
+
+### Passo 2 — O `CLAUDE.md`
+
+É o contexto detalhado do projeto. O Claude é instruído a ler os `CLAUDE.md` (raiz, `api/`, `web/`,
+`db/`, `.claude/`) antes de planejar, implementar ou corrigir. O Ollama não lê esse arquivo: para ele,
+quem leva o padrão é a feature modelo. Um ponto de partida:
+
+```markdown
+# Meu Sistema
+
+Cadastro de clientes e pedidos. NestJS (api/), React + Vite (web/), PostgreSQL (db/init/).
+
+## Regras
+- Strings de interface e mensagens de erro em pt-BR. Erro diz o que fazer, não só o que falhou.
+- Tabelas e colunas em snake_case inglês; campos de API em camelCase.
+- Migrations em db/init/NNN-descricao.sql, numeradas. Nunca editar uma que já rodou.
+- Sem `any`. Sem variável ou import sem uso (quebra o build).
+
+## Padrão de uma feature (copie de `products`)
+- db/init/NNN-<entidade>.sql
+- api/src/modules/<entidade>/{<entidade>.module,controller,service}.ts + dto/ + entities/
+- registrar o módulo em api/src/app.module.ts
+- web/src/pages/<Entidade>Page.tsx + web/src/components/<entidade>/<Entidade>FormModal.tsx
+- registrar a rota em web/src/App.tsx e o item no menu
+```
+
+### Passo 3 — O `.detro/config.json`
+
+```json
+{
+  "projeto": {
+    "nome": "Meu Sistema",
+    "descricao": "cadastro de clientes e pedidos; NestJS + React + PostgreSQL; mensagens em pt-BR"
+  },
+  "ai": {
+    "geracao": "exemplo",
+    "ollama": {
+      "model": "qwen2.5-coder:7b",
+      "numCtx": 32768,
+      "claude": { "enabled": true, "revisar": true, "verificarFeature": true }
+    },
+    "generation": { "maxRepairs": 3 }
+  }
+}
+```
+
+- `"geracao": "exemplo"` deixa claro que o modo é copiar a feature modelo, mesmo que um dia o projeto
+  passe a atender o preset.
+- `numCtx: 32768`: a feature modelo inteira vai no prompt. Com features maiores, aumente.
+- `maxRepairs: 3`: no começo, mais uma rodada de correção ajuda o modelo local.
+
+### Passo 4 — A primeira feature, que vira o template
+
+Peça ao Claude (vai para plano genérico, porque ainda não há modelo):
+
+```bash
+detro plan "crie o cadastro de produtos como PRIMEIRA feature do projeto, que vai servir de modelo
+para as próximas: nome (obrigatório), descrição, preço (número), estoque (inteiro), data de
+lançamento, categoria (enum: eletrônico, livro, outro) e ativo. Migration em db/init, módulo NestJS
+completo (entity, DTOs de criar e editar, service, controller) registrado no app.module, página de
+listagem e modal de cadastro no web, rota e item de menu. Siga o CLAUDE.md."
+
+detro plan --ajustar "<o que mudar>"     # revise com calma: este é o padrão de tudo que vier depois
+detro apply --dry-run
+detro apply
+```
+
+Ou escreva à mão. O importante é o resultado, não quem escreveu.
+
+**Revise essa feature como se fosse código de referência**, porque é isso que ela é: todo erro dela
+vai ser copiado para as próximas.
+
+### O que torna uma feature um bom modelo
+
+O detro encontra a feature modelo sozinho, agrupando arquivos pelo **radical do nome**. Os sufixos
+comuns são ignorados (`.controller`, `.service`, `.dto`, `.entity`, `Page`, `FormModal`, `List`…), e
+singular e plural contam como o mesmo radical. Para ser escolhida, a feature precisa:
+
+| Requisito | Por quê |
+|---|---|
+| **De 2 a 12 arquivos** com o mesmo radical (`product`, `products`, `Product…`) | Menos é pouco para copiar; mais é provavelmente um módulo grande demais |
+| Arquivos em **mais de uma camada** (`api/…`, `web/…`, `db/…`) | É o que mais pesa no ranking: a com mais camadas vence |
+| Radical com 3+ letras e **não genérico** | `index`, `app`, `main`, `utils`, `types`, `api`, `config`, `auth`, `common`, `shared` etc. são ignorados |
+| Radical **exclusivo** dela | Se `product` também aparece em `productImport.ts`, esse arquivo entra no grupo |
+
+E, para o Ollama ter exemplo de tudo:
+
+- **Um campo de cada tipo**: texto obrigatório, texto opcional, número, inteiro, data, enum e booleano.
+  O Ollama adapta campos que já viu; um tipo novo sem exemplo é onde ele mais erra.
+- **Validação no DTO e no formulário**, para ele copiar o jeito de validar.
+- **Registro explícito**: o módulo importado no `app.module.ts`, a rota no `App.tsx`, o item no menu.
+  O detro acha esses arquivos (os que importam ou citam a feature) e clona as linhas de registro
+  para a feature nova.
+- **Nada específico do domínio** que não se repita nas próximas (regra de negócio única, integração).
+  Isso o Ollama copiaria por engano.
+
+Estrutura de exemplo de uma boa feature modelo:
+
+```
+db/init/001-products.sql
+api/src/modules/products/products.module.ts
+api/src/modules/products/products.controller.ts
+api/src/modules/products/products.service.ts
+api/src/modules/products/dto/product.dto.ts
+api/src/modules/products/entities/product.entity.ts
+web/src/pages/ProductsPage.tsx
+web/src/components/products/ProductFormModal.tsx
+web/src/lib/products.ts
+```
+
+São 9 arquivos com o radical `product`, em 3 camadas (`db/init`, `api/src`, `web/src`).
+
+### Como o Ollama usa o modelo
+
+No `detro plan "cadastro de fornecedores com nome, CNPJ e ativo"`:
+
+1. O Ollama separa o pedido em requisitos e monta a spec (entidade `Supplier`, campos…).
+2. O detro escolhe a feature modelo e mostra no plano:
+
+   ```
+   O que encontrei no projeto:
+     Feature usada de modelo: product (9 arquivos)
+     Onde ela está registrada (vai receber a nova feature):
+       ...
+     Outras possíveis: ...
+   ```
+
+3. No `apply --dry-run`, cada arquivo do modelo é **copiado com os nomes trocados** (`Product` →
+   `Supplier`, `products` → `suppliers`, `product_id` → `supplier_id`, em todas as variações de
+   caixa e plural). Só depois o Ollama recebe o arquivo, já renomeado, com a ordem de trocar **apenas
+   o que é do domínio**: campos, tipos, validações, colunas, textos e rotas. Estrutura, imports e
+   estilo ficam iguais.
+4. Cada arquivo passa pelo `tsc`. O que falha volta para correção (`maxRepairs`) e, depois de
+   `afterAttempts` erros seguidos, vai para o Claude.
+5. As linhas de registro (módulo, rota, menu) são clonadas nos arquivos onde o modelo aparece.
+
+Para usar outra feature de modelo num pedido, troque `example.stem` e `example.files` no
+`.detro/last-plan.json` (as candidatas aparecem em "Outras possíveis") e rode o `apply --dry-run`.
+
+### Alternativa: adotar as convenções do preset
+
+O preset tem templates prontos (banco, backend, frontend, menu e consulta) e não precisa de feature
+modelo. Em troca, o projeto precisa seguir **todas** estas convenções. O `detro ai perfil` mostra
+`✓` para cada uma encontrada:
+
+| Convenção | Arquivo |
+|---|---|
+| Rotas com `<RequireScreen>` | `web/src/App.tsx` |
+| Menu `NAV_GROUPS` | `web/src/components/Sidebar.tsx` |
+| `type ScreenKey` | `web/src/lib/screens.ts` |
+| Componentes `Modal`, `Field`, `DataTable`, `PageHeader`, `EmptyState` | `web/src/components/<Nome>.tsx` |
+| Cliente HTTP `export const api` | `web/src/lib/api.ts` |
+| Módulo raiz `@Module` | `api/src/app.module.ts` |
+| `type ScreenKey` | `api/src/modules/permissions/screens.ts` |
+| `@RequirePermission` / `@CurrentOperator` | `api/src/modules/auth/decorators/{permissions,current-operator}.decorator.ts` |
+| Migrations `.sql` | `db/init/` |
+
+Atendidas só as de front e menu, o preset gera telas e itens de menu, mas não o backend. No preset,
+dois ajustes melhoram o resultado:
+
+- **`references.formModal` e `references.page`**: um modal e uma página do projeto. O Ollama recebe
+  os dois como exemplo visual das telas que gera.
+- **Catálogo de componentes**: o detro lê os componentes exportados em `web/src/components/*.tsx`
+  (só o primeiro nível), com as props, e manda a lista ao Ollama, para ele usar o que existe em vez
+  de inventar. Para tirar algum da lista: `"catalog": { "exclude": ["NomeDoComponente"] }`.
+
+Os templates do preset ficam dentro do pacote (`ai/templates/`) e não são configuráveis por projeto.
+Para ter um padrão próprio, use a criação por exemplo.
+
+### Checklist antes de usar o Ollama num projeto novo
+
+- [ ] `detro ai perfil` lista a stack e os projetos TypeScript sem `(sem typescript instalado)`
+- [ ] `CLAUDE.md` na raiz com as regras e o padrão de uma feature
+- [ ] `.detro/config.json` com `projeto.descricao` e o modo de geração
+- [ ] Uma feature modelo completa, com 2 a 12 arquivos, mais de uma camada e um campo de cada tipo
+- [ ] `detro check --tudo` sem erros (o modelo não pode ter erro, ou o erro é copiado)
+- [ ] `detro ai selftest` passando
+- [ ] Um `detro plan "cadastro de <coisa> com <campos>"` mostrando `Feature usada de modelo: <a sua>`
+
 ---
 
 ## Como a IA funciona
@@ -387,7 +635,8 @@ Por cima desse bloco, cada etapa acrescenta o que precisa:
 
 | Etapa | Contexto extra |
 |---|---|
-| Cadastro (preset/exemplo) | Spec do plano, feature modelo do projeto, `references.formModal`/`references.page`, catálogo de componentes, tabelas existentes |
+| Cadastro por exemplo | Spec do plano e cada arquivo da feature modelo, já renomeado para a entidade nova |
+| Cadastro no preset | Spec do plano, templates do detro, `references.formModal`/`references.page`, catálogo de `web/src/components/`, tabelas existentes |
 | Revisão do Claude | O pedido inteiro enviado ao Ollama **mais** a resposta do Ollama, para corrigir |
 | Plano genérico, modo livre, revisão de plano | O Claude lê o projeto com `Read`/`Grep`/`Glob`: os `CLAUDE.md` (raiz, `api/`, `web/`, `db/`, `.claude/`), uma feature parecida e onde ela é registrada |
 | Correção (`fix`, reparos do dry-run) | O arquivo atual e a lista exata de erros do `tsc` e das regras |
@@ -398,7 +647,8 @@ Por cima desse bloco, cada etapa acrescenta o que precisa:
    fuso, idioma das mensagens). Vai em toda chamada, então seja breve.
 2. **`CLAUDE.md` no repositório**: regras de arquitetura, banco e estilo. O Claude é instruído a lê-los
    antes de propor qualquer coisa. É aqui que mora o detalhe; o detro não precisa saber dele.
-3. **`references`**: aponte uma tela e um modal "modelo". As telas geradas copiam o visual deles.
+3. **Uma feature modelo** (criação por exemplo) ou **`references`** (preset): é o que o Ollama copia.
+   Veja [Projeto do zero](#projeto-do-zero-dando-um-modelo-para-o-ollama-copiar).
 4. **O próprio pedido**: nomes, rótulos, rota, permissão e ações escritos no pedido são seguidos.
 
 O Ollama tem janela limitada (`numCtx`, padrão 24.576 tokens). O detro estima o tamanho do prompt
@@ -810,9 +1060,9 @@ escrever é mesclado por cima deles, então basta incluir o que muda.
 |---|---|---|
 | `generation.maxRepairs` | `2` | Quantas vezes a IA tenta corrigir o que não passou nos tipos/regras |
 | `database.container` | `null` | Container PostgreSQL para aplicar migrations. Obrigatório se houver mais de um rodando |
-| `references.formModal` | `null` | Caminho de um modal do projeto que serve de modelo visual |
-| `references.page` | `null` | Caminho de uma página do projeto que serve de modelo visual |
-| `catalog.exclude` | `[]` | Componentes que não devem entrar no catálogo enviado à IA |
+| `references.formModal` | `null` | Preset: caminho de um modal do projeto que serve de modelo visual |
+| `references.page` | `null` | Preset: caminho de uma página do projeto que serve de modelo visual |
+| `catalog.exclude` | `[]` | Preset: componentes de `web/src/components/` que não entram no catálogo enviado à IA |
 | `review.maxFileChars` | `24000` | Tamanho máximo de arquivo na revisão com IA |
 | `review.tenantExclude` | `["/workers/"]` | Caminhos ignorados pela checagem de filtro por tenant |
 
@@ -855,7 +1105,7 @@ não são TypeScript saem sem checagem de tipos.
 |---|---|---|
 | `Não foi possível conectar ao Ollama` | Ollama parado ou em outro endereço | `ollama serve`, ou ajuste `ai.ollama.baseUrl` |
 | `O modelo X não está instalado no Ollama` | Modelo não baixado | `ollama pull X`, ou `detro ai models` para escolher um instalado |
-| `O prompt tem ~N tokens e o contexto configurado é M` | Prompt maior que 80% da janela | `detro ai ctx 32768`, ou aponte `references` menores |
+| `O prompt tem ~N tokens e o contexto configurado é M` | Prompt maior que 80% da janela | `detro ai ctx 32768`, ou use uma feature modelo / `references` menores |
 | `A resposta do modelo foi cortada pelo limite de contexto` | Janela pequena para a resposta | `detro ai ctx <maior>` |
 | `O modelo ficou N min sem gerar nada` | Modelo lento ou travado | Use um modelo menor, ou aumente `ai.ollama.timeoutMs` |
 | `Não foi possível executar o Claude Code` | `claude` fora do PATH ou deslogado | Instale e rode `claude` uma vez para logar |
