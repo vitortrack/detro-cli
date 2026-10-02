@@ -755,6 +755,11 @@ async function planejarGenerico({ projectDir, config, request, motivo }) {
   return concluirPlanoGenerico({ projectDir, config, plan: { request, recipe: 'generico', generic }, sempre: true });
 }
 
+function seguirAjuste({ projectDir, config, ajuste }) {
+  if (ajuste.acao === 'generico') return planejarGenerico({ projectDir, config, request: ajuste.pedido });
+  return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+}
+
 async function concluirPlanoGenerico({ projectDir, config, plan, sempre }) {
   const validacao = await validarPlanoGenerico(projectDir, plan.generic);
   mostrarPlanoGenerico(plan.generic, validacao);
@@ -767,7 +772,7 @@ async function concluirPlanoGenerico({ projectDir, config, plan, sempre }) {
 
   const ajuste = await oferecerAjusteClaude({ projectDir, config, plan, errors: validacao.errors, warnings: validacao.warnings, sempre });
   if (ajuste) {
-    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+    return seguirAjuste({ projectDir, config, ajuste });
   }
 
   mostrarProximoPasso(validacao.errors.length > 0);
@@ -807,7 +812,7 @@ export async function runPlanCommand({ projectDir, args }) {
     const ajuste = await ajustarPlano({ projectDir, config, plan, instrucao, errors: prepared.errors, warnings: prepared.warnings, unsupported: generico ? [] : prepared.spec.unsupported });
 
     if (!ajuste) return 0;
-    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+    return seguirAjuste({ projectDir, config, ajuste });
   }
 
   if (args.includes('--revalidar')) {
@@ -886,7 +891,7 @@ export async function runPlanCommand({ projectDir, args }) {
 
     const ajuste = await oferecerAjusteClaude({ projectDir, config, plan, errors: prepared.errors, warnings: prepared.warnings, unsupported: prepared.spec.unsupported });
     if (ajuste) {
-      return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+      return seguirAjuste({ projectDir, config, ajuste });
     }
 
     mostrarProximoPasso(prepared.errors.length > 0);
@@ -1032,7 +1037,7 @@ export async function runPlanCommand({ projectDir, args }) {
 
   const ajuste = await oferecerAjusteClaude({ projectDir, config, plan: { request, spec: result.spec, requirements: result.requirements }, errors: result.errors, warnings: result.warnings, unsupported: result.spec.unsupported });
   if (ajuste) {
-    return runPlanCommand({ projectDir, args: ajuste.acao === 'replanejar' ? [ajuste.pedido] : ['--revalidar'] });
+    return seguirAjuste({ projectDir, config, ajuste });
   }
 
   if (result.errors.length === 0) {

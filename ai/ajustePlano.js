@@ -94,6 +94,17 @@ function mostrarResposta(resposta) {
   console.log();
 }
 
+function pedidoDaProposta(pedido, resposta) {
+  return [
+    pedido,
+    '',
+    'Solução já definida na análise do plano (siga esta, não crie cadastro novo):',
+    resposta.analise,
+    ...resposta.manter.map((item) => `- Manter: ${item}`),
+    ...resposta.mudancas.map((item) => `- ${item.descricao} (${item.motivo})`),
+  ].join('\n');
+}
+
 async function salvar({ projectDir, plan, spec }) {
   await saveLastPlan(eGenerico(plan)
     ? { projectDir, request: plan.request, recipe: 'generico', generic: spec, createdAt: plan.createdAt }
@@ -134,6 +145,7 @@ async function conversarComClaude({ projectDir, config, plan, errors, warnings, 
     mostrarResposta(resposta);
 
     const semMudanca = resposta.mudancas.length === 0 || JSON.stringify(resposta.spec) === JSON.stringify(objetoDoPlano(plan));
+    const propostaForaDoSpec = semMudanca && resposta.mudancas.length > 0;
     const escolha = await select({
       message: 'E agora?',
       choices: [
@@ -141,16 +153,19 @@ async function conversarComClaude({ projectDir, config, plan, errors, warnings, 
           { name: 'Aplicar todas as mudanças e revalidar', value: 'todas' },
           { name: 'Escolher quais mudanças aplicar', value: 'escolher' },
         ]),
+        ...(propostaForaDoSpec ? [{ name: 'Seguir com a proposta do Claude (o detro monta o plano a partir dela)', value: 'proposta' }] : []),
+        ...(resposta.mudancas.length === 0 ? [{ name: 'Confirmar o plano e seguir', value: 'manter' }] : []),
         { name: 'Orientar o Claude (manter/remover algo, outra ideia) e perguntar de novo', value: 'orientar' },
         { name: 'Reformular o pedido (o detro interpreta de novo)', value: 'reformular' },
-        { name: 'Manter o plano como estava', value: 'manter' },
+        ...(resposta.mudancas.length > 0 ? [{ name: 'Manter o plano como estava', value: 'manter' }] : []),
       ],
     });
 
     if (escolha === 'manter') {
-      console.log(chalk.dim('Plano mantido como estava.'));
+      console.log(chalk.dim(resposta.mudancas.length === 0 ? 'Plano confirmado.' : 'Plano mantido como estava.'));
       return null;
     }
+    if (escolha === 'proposta') return { acao: 'generico', pedido: pedidoDaProposta(plan.request, resposta) };
     if (escolha === 'todas') return salvar({ projectDir, plan, spec: resposta.spec });
     if (escolha === 'reformular') return { acao: 'replanejar', pedido: await input({ message: 'Novo pedido:', default: plan.request, required: true }) };
 
