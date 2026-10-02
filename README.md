@@ -1,4 +1,4 @@
-<h1 align="center">detro CLI</h1>
+<h1 align="center">Detro CLI</h1>
 
 <p align="center">
   Gerador de CRUD e de código com IA para projetos TypeScript.<br>
