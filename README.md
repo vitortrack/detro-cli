@@ -700,6 +700,29 @@ claude -p --output-format json --json-schema <schema> \
 - `--json-schema`: a resposta vem estruturada e validada, sem texto solto para interpretar.
 - `--no-session-persistence`: as chamadas não poluem o seu histórico do Claude Code.
 
+### Agente com modelo forte
+
+Com `"agente": true`, o que hoje exige o Claude lendo o projeto (plano genérico, modo livre, ajuste de
+plano, correções e verificação final) passa primeiro por um agente do próprio detro, rodando o modelo
+de `ai.ollama.model`. Ele tem as mesmas ferramentas só de leitura (`listar_arquivos`, `buscar`,
+`ler_arquivo`), e o código continua passando por `tsc` e pelas regras do projeto. O Claude só entra
+se o agente falhar (erro, passou de 30 passos ou JSON fora do formato).
+
+Precisa de um modelo forte em chamada de ferramentas. Modelos locais de 7–8B se perdem no laço;
+os de nuvem do Ollama funcionam bem:
+
+```bash
+ollama signin                          # uma vez, com a conta do ollama.com
+ollama pull gpt-oss:120b-cloud         # só registra; roda na nuvem
+detro ai model gpt-oss:120b-cloud
+```
+
+```json
+"ollama": { "model": "gpt-oss:120b-cloud", "agente": true, "claude": { "revisar": false } }
+```
+
+Com modelo de nuvem, **o código do projeto sai da máquina** para os servidores do Ollama.
+
 ### Modos de geração
 
 O modo sai do `detro ai perfil`, ou é forçado com `"ai": { "geracao": ... }`:
@@ -1041,6 +1064,7 @@ escrever é mesclado por cima deles, então basta incluir o que muda.
 | `numCtx` | `24576` | Janela de contexto em tokens. Maior usa mais memória. Troque com `detro ai ctx` |
 | `temperature` | `0.2` | Variação das respostas livres. Respostas estruturadas sempre usam `0` |
 | `timeoutMs` | `900000` (15 min) | Tempo máximo **sem gerar nada**; o contador reinicia a cada pedaço recebido |
+| `agente` | `false` | Liga o [agente](#agente-com-modelo-forte): o modelo do Ollama lê o projeto sozinho e faz o que hoje é do Claude |
 
 ### `ai.ollama.claude`
 

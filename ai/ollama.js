@@ -1,6 +1,9 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
+import path from 'node:path';
+import { promisify } from 'node:util';
 
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || 'http://127.0.0.1:11434').replace(/\/$/, '');
@@ -326,4 +329,109 @@ export async function ollamaJson({ ollama, messages, schema, onProgress, attempt
     avisarEscalada('O Ollama devolveu um JSON inválido');
     return JSON.parse((await claudeChat({ claude: ollama.claude ?? {}, messages, schema })).content);
   }
+}
+
+const MAX_PASSOS_AGENTE = 30;
+const MAX_SAIDA_FERRAMENTA = 20000;
+const git = promisify(execFile);
+
+const FERRAMENTAS_AGENTE = [
+  ['listar_arquivos', 'Lista os arquivos versionados cujo caminho contém o texto, ou que casam com um glob como "api/src/**/*.dto.ts" (equivale ao Glob).', { filtro: 'string' }, ['filtro']],
+  ['buscar', 'Busca uma regex (git grep -E) no código e devolve caminho:linha:trecho (equivale ao Grep). "pasta" (relativa à raiz do projeto, ex.: "api/src") limita a busca.', { padrao: 'string', pasta: 'string' }, ['padrao']],
+  ['ler_arquivo', 'Lê um arquivo com as linhas numeradas, até 400 linhas por chamada (equivale ao Read).', { caminho: 'string', inicio: 'integer', fim: 'integer' }, ['caminho']],
+].map(([name, description, props, required]) => ({
+  type: 'function',
+  function: {
+    name,
+    description,
+    parameters: { type: 'object', properties: Object.fromEntries(Object.entries(props).map(([k, type]) => [k, { type }])), required },
+  },
+}));
+
+function globParaRegex(glob) {
+  const corpo = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '\u0000').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '(?:.*/)?');
+  return new RegExp(`^${corpo}$`);
+}
+
+async function executarFerramenta(projectDir, { name, arguments: args = {} }) {
+  const saidaGit = (params) => git('git', params, { cwd: projectDir, maxBuffer: 5e7 })
+    .then(({ stdout }) => stdout, (error) => (error.code === 1 ? '' : Promise.reject(error)));
+
+  if (name === 'listar_arquivos') {
+    const filtro = String(args.filtro ?? '');
+    const casa = filtro.includes('*') ? globParaRegex(filtro) : null;
+    const achados = (await saidaGit(['ls-files'])).split('\n').filter((f) => f && (casa ? casa.test(f) : f.includes(filtro)));
+    return achados.length > 0 ? achados.slice(0, 200).join('\n') : '(nenhum arquivo com esse trecho no caminho)';
+  }
+  if (name === 'buscar') {
+    const linhas = (await saidaGit(['grep', '-n', '-I', '-E', '-e', String(args.padrao ?? ''), '--', args.pasta || '.'])).split('\n').filter(Boolean);
+    return linhas.length > 0 ? linhas.slice(0, 100).join('\n') : '(nenhum resultado)';
+  }
+  if (name === 'ler_arquivo') {
+    const absoluto = path.resolve(projectDir, String(args.caminho ?? ''));
+    if (!absoluto.startsWith(path.resolve(projectDir) + path.sep)) return 'Erro: o caminho precisa estar dentro do projeto.';
+    const linhas = (await readFile(absoluto, 'utf8')).split('\n');
+    const inicio = Math.max(1, Number(args.inicio) || 1);
+    const fim = Math.min(linhas.length, Number(args.fim) || inicio + 399, inicio + 399);
+    const corpo = linhas.slice(inicio - 1, fim).map((linha, i) => `${inicio + i}: ${linha}`).join('\n');
+    return fim < linhas.length ? `${corpo}\n(arquivo tem ${linhas.length} linhas; leia o resto com inicio=${fim + 1})` : corpo;
+  }
+  return `Erro: ferramenta inexistente "${name}". Use listar_arquivos, buscar ou ler_arquivo.`;
+}
+
+async function chamadaAgente(ollama, corpo) {
+  const response = await request(`${normalizeBaseUrl(ollama.baseUrl)}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: ollama.model, stream: false, options: { num_ctx: ollama.numCtx }, ...corpo }),
+    signal: AbortSignal.timeout(ollama.timeoutMs ?? 900000),
+  });
+  const data = await response.json();
+  if (data.error) throw new Error(`Ollama: ${data.error}`);
+  return data.message ?? {};
+}
+
+function extrairJson(texto) {
+  const limpo = String(texto ?? '').trim();
+  try {
+    return JSON.parse(limpo);
+  } catch {
+    const inicio = limpo.indexOf('{');
+    const fim = limpo.lastIndexOf('}');
+    if (inicio < 0 || fim <= inicio) throw new Error('o agente não devolveu JSON');
+    return JSON.parse(limpo.slice(inicio, fim + 1));
+  }
+}
+
+export async function agenteJson({ projectDir, prompt, schema, comFerramentas, ollama }) {
+  const messages = [
+    {
+      role: 'system',
+      content: comFerramentas
+        ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes.'
+        : 'Responda só com o que está no enunciado.',
+    },
+    { role: 'user', content: prompt },
+  ];
+
+  if (comFerramentas) {
+    for (let passo = 1; ; passo += 1) {
+      if (passo > MAX_PASSOS_AGENTE) throw new Error(`o agente passou de ${MAX_PASSOS_AGENTE} passos sem concluir`);
+      const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, options: { num_ctx: ollama.numCtx, temperature: 0 } });
+      messages.push({ role: 'assistant', content: mensagem.content ?? '', tool_calls: mensagem.tool_calls });
+      if (!mensagem.tool_calls?.length) break;
+      for (const chamada of mensagem.tool_calls) {
+        const saida = await executarFerramenta(projectDir, chamada.function).catch((error) => `Erro: ${error.message}`);
+        process.stderr.write(`    · ${chamada.function.name} ${JSON.stringify(chamada.function.arguments ?? {}).slice(0, 120)}\n`);
+        messages.push({ role: 'tool', tool_name: chamada.function.name, content: saida.slice(0, MAX_SAIDA_FERRAMENTA) });
+      }
+    }
+  }
+  messages.push({ role: 'user', content: `Agora devolva a resposta final SOMENTE como JSON que siga EXATAMENTE este JSON Schema, com estas chaves e nenhuma outra:\n${JSON.stringify(schema)}` });
+
+  const final = await chamadaAgente(ollama, { messages, format: schema, options: { num_ctx: ollama.numCtx, temperature: 0 } });
+  const resposta = extrairJson(final.content);
+  const faltando = (schema.required ?? []).filter((chave) => !(chave in resposta));
+  if (faltando.length > 0) throw new Error(`a resposta do agente não segue o formato (faltou ${faltando.join(', ')})`);
+  return resposta;
 }

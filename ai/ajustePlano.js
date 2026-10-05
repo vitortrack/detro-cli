@@ -1,6 +1,6 @@
 import { checkbox, input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
-import { chamarClaudeJson } from './livre.js';
+import { chamarIaJson } from './livre.js';
 import { saveLastPlan } from './planStore.js';
 
 const SCHEMA = {
@@ -56,7 +56,8 @@ const LIMITE_AJUSTE_MS = 180000;
 
 async function perguntarAoClaude({ projectDir, config, orientacao, ...contexto }) {
   const claude = config.ai.ollama.claude ?? {};
-  const pedir = (tools) => chamarClaudeJson({
+  const pedir = (tools) => chamarIaJson({
+    ollama: config.ai.ollama,
     projectDir,
     prompt: montarPrompt({ ...contexto, contexto: config.ai.ollama.projectContext, orientacao }),
     schema: SCHEMA,

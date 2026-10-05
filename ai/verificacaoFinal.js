@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 import { unifiedDiff } from './diff.js';
-import { chamarClaudeJson } from './livre.js';
+import { chamarIaJson, quemAtende } from './livre.js';
 import { validateFile } from './validator.js';
 
 const SCHEMA = {
@@ -65,12 +65,13 @@ export async function verificarFeature({ projectDir, config, request, files, pri
   }
 
   console.log();
-  console.log(chalk.magenta.bold('VERIFICAÇÃO FINAL (Claude)'));
+  console.log(chalk.magenta.bold(`VERIFICAÇÃO FINAL (${quemAtende(config.ai.ollama)})`));
   console.log(chalk.dim(`Conferindo a coerência entre os ${files.length} arquivo(s) da feature…`));
 
   let resposta;
   try {
-    resposta = await chamarClaudeJson({
+    resposta = await chamarIaJson({
+      ollama: config.ai.ollama,
       projectDir,
       prompt: montarPedido({
         contexto: config.ai.ollama.projectContext,
@@ -122,7 +123,7 @@ export async function verificarFeature({ projectDir, config, request, files, pri
   if (aceitas.length === 0) {
     console.log(chalk.green('  ✓ Nada a corrigir: os arquivos estão coerentes entre si.'));
   } else if (reprovadas.length > 0) {
-    console.log(chalk.yellow(`  ✗ ${reprovadas.length} correção(ões) do Claude não passaram nos tipos; mantida a versão anterior da feature inteira.`));
+    console.log(chalk.yellow(`  ✗ ${reprovadas.length} correção(ões) da verificação não passaram nos tipos; mantida a versão anterior da feature inteira.`));
     for (const { correcao, validacao } of reprovadas) {
       console.log(chalk.dim(`    ${correcao.path}`));
       for (const erro of validacao.errors) console.log(chalk.dim(`      ${erro}`));

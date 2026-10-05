@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
-import { chamarClaudeJson } from './livre.js';
+import { chamarIaJson, quemAtende } from './livre.js';
 
 const LIMITE_PLANO_MS = 300000;
 
@@ -46,9 +46,10 @@ function montarPrompt(request, contexto) {
 
 export async function criarPlanoGenerico({ projectDir, config, request }) {
   const claude = config.ai.ollama.claude ?? {};
-  console.log(chalk.magenta('▸ Plano genérico: o Claude está lendo o projeto e montando o plano (sem escrever código)…'));
+  console.log(chalk.magenta(`▸ Plano genérico: ${quemAtende(config.ai.ollama)} está lendo o projeto e montando o plano (sem escrever código)…`));
 
-  return chamarClaudeJson({
+  return chamarIaJson({
+    ollama: config.ai.ollama,
     projectDir,
     prompt: montarPrompt(request, config.ai.ollama.projectContext),
     schema: SCHEMA,

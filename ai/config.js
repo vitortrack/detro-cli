@@ -15,6 +15,7 @@ const DEFAULT_CONFIG = {
       numCtx: 24576,
       temperature: 0.2,
       timeoutMs: 900000,
+      agente: false,
       claude: {
         enabled: true,
         revisar: true,

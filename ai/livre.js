@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 import { sha256 } from './generator.js';
+import { agenteJson } from './ollama.js';
 import { saveImplementation } from './implementationStore.js';
 import { validateFile } from './validator.js';
 import { applyEdits } from './editor.js';
@@ -89,7 +90,22 @@ function montarCorrecao(request, relativo, conteudo, erros, novo) {
   ].join('\n');
 }
 
-export function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco }) {
+export const quemAtende = (ollama) => (ollama?.agente ? `o agente (${ollama.model})` : 'o Claude');
+
+export async function chamarIaJson({ ollama, ...pedido }) {
+  if (ollama?.agente) {
+    process.stderr.write(`  ▸ agente ${ollama.model} lendo o projeto…\n`);
+    try {
+      return await agenteJson({ projectDir: pedido.projectDir, prompt: pedido.prompt, schema: pedido.schema, comFerramentas: (pedido.tools ?? []).length > 0, ollama });
+    } catch (error) {
+      if (pedido.claude?.enabled === false) throw error;
+      process.stderr.write(`\n  ↑ agente: ${error.message} — chamando o Claude…\n`);
+    }
+  }
+  return chamarClaudeJson(pedido);
+}
+
+function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco }) {
   const args = [
     '-p',
     ...(tools.length > 0 ? ['--tools', ...tools, '--allowedTools', ...tools] : ['--tools', '']),
@@ -154,10 +170,11 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
   if (motivo) {
     console.log(chalk.yellow(`  O pipeline do Ollama não encaixou o pedido (${motivo})`));
   }
-  console.log(chalk.magenta('▸ Modo livre: o Claude está lendo o projeto e preparando a mudança…'));
+  console.log(chalk.magenta(`▸ Modo livre: ${quemAtende(config.ai.ollama)} está lendo o projeto e preparando a mudança…`));
   const claude = config.ai.ollama.claude ?? {};
 
-  const pedir = (foco) => chamarClaudeJson({
+  const pedir = (foco) => chamarIaJson({
+    ollama: config.ai.ollama,
     projectDir,
     prompt: montarPedido(request, config.ai.ollama.projectContext, foco),
     schema: SCHEMA,
@@ -196,7 +213,7 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
     const original = arquivo.acao === 'modify' ? originais.get(relativo) ?? null : null;
 
     if (arquivo.acao === 'modify' && original === null) {
-      console.log(chalk.red(`  ✗ ${relativo}: o Claude propôs alterar um arquivo que não existe.`));
+      console.log(chalk.red(`  ✗ ${relativo}: a proposta altera um arquivo que não existe.`));
       comProblema += 1;
       continue;
     }
@@ -212,8 +229,9 @@ export async function planejarLivre({ projectDir, config, request, motivo, print
     let validacao = await validar();
 
     for (let tentativa = 1; !validacao.valid && tentativa <= maxRepairs; tentativa += 1) {
-      console.log(chalk.magenta(`  ▸ ${relativo}: ${validacao.errors.length} problema(s), o Claude está corrigindo (tentativa ${tentativa}/${maxRepairs})…`));
-      const correcao = await chamarClaudeJson({
+      console.log(chalk.magenta(`  ▸ ${relativo}: ${validacao.errors.length} problema(s), ${quemAtende(config.ai.ollama)} está corrigindo (tentativa ${tentativa}/${maxRepairs})…`));
+      const correcao = await chamarIaJson({
+        ollama: config.ai.ollama,
         projectDir,
         prompt: montarCorrecao(request, relativo, arquivo.conteudo, validacao.errors, arquivo.acao === 'create'),
         schema: SCHEMA_CORRECAO,
