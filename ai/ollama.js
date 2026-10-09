@@ -388,6 +388,10 @@ async function chamadaAgente(ollama, corpo) {
   });
   const data = await response.json();
   if (data.error) throw new Error(`Ollama: ${data.error}`);
+  const usados = (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0);
+  const k = (n) => `${(n / 1000).toFixed(1)}k`;
+  process.stderr.write(`    ⧗ ${k(usados)}${ollama.numCtx ? ` / ${k(ollama.numCtx)} tokens (${Math.round((usados / ollama.numCtx) * 100)}%)` : ' tokens'}\n`);
+  if (data.done_reason === 'length') throw new Error(`a resposta foi cortada pelo limite de contexto (${ollama.numCtx} tokens); aumente com "detro ai ctx <tokens>"`);
   return data.message ?? {};
 }
 
@@ -423,7 +427,10 @@ export async function agenteJson({ projectDir, prompt, schema, comFerramentas, o
 
   if (comFerramentas) {
     for (let passo = 1; ; passo += 1) {
-      if (passo > MAX_PASSOS_AGENTE || (ollama.numCtx && estimateTokens(messages) > ollama.numCtx * 0.8)) break;
+      if (passo > MAX_PASSOS_AGENTE || (ollama.numCtx && estimateTokens(messages) > ollama.numCtx * 0.8)) {
+        process.stderr.write(`    · leitura encerrada (limite de ${MAX_PASSOS_AGENTE} passos ou 80% do contexto de ${ollama.numCtx} tokens)\n`);
+        break;
+      }
       const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, options: { num_ctx: ollama.numCtx, temperature: 0 } });
       messages.push({ role: 'assistant', content: mensagem.content ?? '', tool_calls: mensagem.tool_calls });
       if (!mensagem.tool_calls?.length) break;
