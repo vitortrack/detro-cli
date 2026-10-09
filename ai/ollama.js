@@ -331,7 +331,7 @@ export async function ollamaJson({ ollama, messages, schema, onProgress, attempt
   }
 }
 
-const MAX_PASSOS_AGENTE = 30;
+const MAX_PASSOS_AGENTE = 60;
 const MAX_SAIDA_FERRAMENTA = 20000;
 const git = promisify(execFile);
 
@@ -403,20 +403,27 @@ function extrairJson(texto) {
   }
 }
 
+async function instrucoesDoProjeto(projectDir) {
+  const partes = await Promise.all(['CLAUDE.md', '.claude/CLAUDE.md'].map((arquivo) => readFile(path.join(projectDir, arquivo), 'utf8')
+    .then((texto) => `# ${arquivo}\n${texto}`, () => '')));
+  return partes.filter(Boolean).join('\n\n');
+}
+
 export async function agenteJson({ projectDir, prompt, schema, comFerramentas, ollama }) {
+  const regras = comFerramentas
+    ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes. Os CLAUDE.md da raiz já estão abaixo; ao mexer em uma pasta que tenha CLAUDE.md próprio (api/, web/ etc.), leia-o antes.'
+    : 'Responda só com o que está no enunciado.';
   const messages = [
     {
       role: 'system',
-      content: comFerramentas
-        ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes.'
-        : 'Responda só com o que está no enunciado.',
+      content: [ollama.projectContext, regras, comFerramentas ? await instrucoesDoProjeto(projectDir) : ''].filter(Boolean).join('\n\n'),
     },
     { role: 'user', content: prompt },
   ];
 
   if (comFerramentas) {
     for (let passo = 1; ; passo += 1) {
-      if (passo > MAX_PASSOS_AGENTE) throw new Error(`o agente passou de ${MAX_PASSOS_AGENTE} passos sem concluir`);
+      if (passo > MAX_PASSOS_AGENTE || (ollama.numCtx && estimateTokens(messages) > ollama.numCtx * 0.8)) break;
       const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, options: { num_ctx: ollama.numCtx, temperature: 0 } });
       messages.push({ role: 'assistant', content: mensagem.content ?? '', tool_calls: mensagem.tool_calls });
       if (!mensagem.tool_calls?.length) break;
