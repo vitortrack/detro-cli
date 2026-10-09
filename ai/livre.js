@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 import { sha256 } from './generator.js';
-import { agenteJson } from './ollama.js';
 import { saveImplementation } from './implementationStore.js';
 import { validateFile } from './validator.js';
 import { applyEdits } from './editor.js';
@@ -96,7 +95,7 @@ export async function chamarIaJson({ ollama, ...pedido }) {
   if (ollama?.agente) {
     process.stderr.write(`  ▸ agente ${ollama.model} lendo o projeto…\n`);
     try {
-      return await agenteJson({ projectDir: pedido.projectDir, prompt: pedido.prompt, schema: pedido.schema, comFerramentas: (pedido.tools ?? []).length > 0, ollama });
+      return await chamarClaudeJson({ ...pedido, claude: { ...pedido.claude, model: ollama.model }, ollamaUrl: ollama.baseUrl });
     } catch (error) {
       if (pedido.claude?.enabled === false) throw error;
       process.stderr.write(`\n  ↑ agente: ${error.message} — chamando o Claude…\n`);
@@ -105,7 +104,7 @@ export async function chamarIaJson({ ollama, ...pedido }) {
   return chamarClaudeJson(pedido);
 }
 
-function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco }) {
+function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco, ollamaUrl }) {
   const args = [
     '-p',
     ...(tools.length > 0 ? ['--tools', ...tools, '--allowedTools', ...tools] : ['--tools', '']),
@@ -119,6 +118,7 @@ function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esfo
 
   const env = { ...process.env };
   if (!claude.usarApiKey) delete env.ANTHROPIC_API_KEY;
+  if (ollamaUrl) Object.assign(env, { ANTHROPIC_BASE_URL: ollamaUrl.replace(/\/$/, ''), ANTHROPIC_AUTH_TOKEN: 'ollama', ANTHROPIC_API_KEY: '' });
 
   return new Promise((resolve, reject) => {
     const child = spawn('claude', args, { cwd: projectDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
