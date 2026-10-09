@@ -104,11 +104,39 @@ export async function chamarIaJson({ ollama, ...pedido }) {
   return chamarClaudeJson(pedido);
 }
 
+let tokensDaExecucao = 0;
+const milhar = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const umaLinha = (texto, max = 140) => String(texto ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+function mostrarEvento(evento, projectDir) {
+  const conteudo = Array.isArray(evento.message?.content) ? evento.message.content : [];
+  for (const parte of conteudo) {
+    if (evento.type === 'assistant' && parte.type === 'thinking' && parte.thinking) {
+      process.stderr.write(chalk.dim.italic(`  ✻ ${umaLinha(parte.thinking)}\n`));
+    } else if (evento.type === 'assistant' && parte.type === 'text' && parte.text.trim()) {
+      process.stderr.write(`  ${chalk.white('●')} ${umaLinha(parte.text)}\n`);
+    } else if (evento.type === 'assistant' && parte.type === 'tool_use' && parte.name !== 'StructuredOutput') {
+      const alvo = parte.input?.file_path ? path.relative(projectDir, parte.input.file_path) : parte.input?.pattern ?? '';
+      process.stderr.write(`  ${chalk.green('●')} ${chalk.bold(parte.name)}(${alvo})\n`);
+    } else if (evento.type === 'user' && parte.type === 'tool_result' && !String(parte.content).startsWith('Structured output')) {
+      const texto = Array.isArray(parte.content) ? parte.content.map((c) => c.text ?? '').join('\n') : String(parte.content ?? '');
+      process.stderr.write(chalk.dim(`    ⎿ ${parte.is_error ? `erro: ${umaLinha(texto, 100)}` : `${texto.split('\n').length} linhas`}\n`));
+    }
+  }
+}
+
+function mostrarTokens(uso = {}) {
+  const entrada = (uso.input_tokens ?? 0) + (uso.cache_read_input_tokens ?? 0) + (uso.cache_creation_input_tokens ?? 0);
+  const total = entrada + (uso.output_tokens ?? 0);
+  tokensDaExecucao += total;
+  process.stderr.write(chalk.dim(`  ⧗ ${milhar(total)} tokens nesta chamada (entrada ${milhar(entrada)}, ${milhar(uso.cache_read_input_tokens ?? 0)} do cache · saída ${milhar(uso.output_tokens ?? 0)}) · ${milhar(tokensDaExecucao)} no total\n`));
+}
+
 function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esforco, ollamaUrl }) {
   const args = [
     '-p',
     ...(tools.length > 0 ? ['--tools', ...tools, '--allowedTools', ...tools] : ['--tools', '']),
-    '--output-format', 'json',
+    '--output-format', 'stream-json', '--verbose',
     '--json-schema', JSON.stringify(schema),
     '--no-session-persistence',
     '--setting-sources', 'project',
@@ -124,6 +152,7 @@ function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esfo
     const child = spawn('claude', args, { cwd: projectDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
+    let resultado = null;
     const limiteMs = claude.timeoutMs ?? 600000;
     const inicio = Date.now();
     let estourou = false;
@@ -143,7 +172,23 @@ function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esfo
       if (aviso) clearInterval(aviso);
     };
 
-    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.stdout.on('data', (chunk) => {
+      out += chunk;
+      let fim = out.indexOf('\n');
+      while (fim >= 0) {
+        const linha = out.slice(0, fim).trim();
+        out = out.slice(fim + 1);
+        fim = out.indexOf('\n');
+        if (!linha) continue;
+        try {
+          const evento = JSON.parse(linha);
+          if (evento.type === 'result') resultado = evento;
+          else mostrarEvento(evento, projectDir);
+        } catch {
+          continue;
+        }
+      }
+    });
     child.stderr.on('data', (chunk) => { err += chunk; });
     child.on('error', (error) => {
       parar();
@@ -154,7 +199,8 @@ function chamarClaudeJson({ projectDir, prompt, schema, tools = [], claude, esfo
       parar();
       if (estourou) return;
       try {
-        const data = JSON.parse(out);
+        const data = resultado ?? JSON.parse(out);
+        mostrarTokens(data.usage);
         if (data.is_error) throw new Error(String(data.result ?? ''));
         resolve(data.structured_output ?? JSON.parse(data.result));
       } catch (error) {
