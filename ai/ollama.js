@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
@@ -332,13 +332,13 @@ export async function ollamaJson({ ollama, messages, schema, onProgress, attempt
 }
 
 const MAX_PASSOS_AGENTE = 60;
-const MAX_SAIDA_FERRAMENTA = 20000;
+const MAX_SAIDA_FERRAMENTA = 60000;
 const git = promisify(execFile);
 
 const FERRAMENTAS_AGENTE = [
   ['listar_arquivos', 'Lista os arquivos versionados cujo caminho contém o texto, ou que casam com um glob como "api/src/**/*.dto.ts" (equivale ao Glob).', { filtro: 'string' }, ['filtro']],
-  ['buscar', 'Busca uma regex (git grep -E) no código e devolve caminho:linha:trecho (equivale ao Grep). "pasta" (relativa à raiz do projeto, ex.: "api/src") limita a busca.', { padrao: 'string', pasta: 'string' }, ['padrao']],
-  ['ler_arquivo', 'Lê um arquivo com as linhas numeradas, até 400 linhas por chamada (equivale ao Read).', { caminho: 'string', inicio: 'integer', fim: 'integer' }, ['caminho']],
+  ['buscar', 'Busca uma regex (git grep -E) no código e devolve caminho:linha:trecho (equivale ao Grep). "pasta" (relativa à raiz do projeto, ex.: "api/src") limita a busca. "contexto" (até 20) traz essa quantidade de linhas antes e depois de cada resultado, como grep -C, e evita ler o arquivo depois.', { padrao: 'string', pasta: 'string', contexto: 'integer' }, ['padrao']],
+  ['ler_arquivo', 'Lê um arquivo com as linhas numeradas, até 1000 linhas por chamada (equivale ao Read).', { caminho: 'string', inicio: 'integer', fim: 'integer' }, ['caminho']],
 ].map(([name, description, props, required]) => ({
   type: 'function',
   function: {
@@ -364,15 +364,16 @@ async function executarFerramenta(projectDir, { name, arguments: args = {} }) {
     return achados.length > 0 ? achados.slice(0, 200).join('\n') : '(nenhum arquivo com esse trecho no caminho)';
   }
   if (name === 'buscar') {
-    const linhas = (await saidaGit(['grep', '-n', '-I', '-E', '-e', String(args.padrao ?? ''), '--', args.pasta || '.'])).split('\n').filter(Boolean);
-    return linhas.length > 0 ? linhas.slice(0, 100).join('\n') : '(nenhum resultado)';
+    const contexto = Math.min(20, Math.max(0, Number(args.contexto) || 0));
+    const linhas = (await saidaGit(['grep', '-n', '-I', '-E', `-C${contexto}`, '-e', String(args.padrao ?? ''), '--', args.pasta || '.'])).split('\n').filter(Boolean);
+    return linhas.length > 0 ? linhas.slice(0, 300).join('\n') : '(nenhum resultado)';
   }
   if (name === 'ler_arquivo') {
     const absoluto = path.resolve(projectDir, String(args.caminho ?? ''));
     if (!absoluto.startsWith(path.resolve(projectDir) + path.sep)) return 'Erro: o caminho precisa estar dentro do projeto.';
     const linhas = (await readFile(absoluto, 'utf8')).split('\n');
     const inicio = Math.max(1, Number(args.inicio) || 1);
-    const fim = Math.min(linhas.length, Number(args.fim) || inicio + 399, inicio + 399);
+    const fim = Math.min(linhas.length, Number(args.fim) || inicio + 999, inicio + 999);
     const corpo = linhas.slice(inicio - 1, fim).map((linha, i) => `${inicio + i}: ${linha}`).join('\n');
     return fim < linhas.length ? `${corpo}\n(arquivo tem ${linhas.length} linhas; leia o resto com inicio=${fim + 1})` : corpo;
   }
@@ -380,11 +381,15 @@ async function executarFerramenta(projectDir, { name, arguments: args = {} }) {
 }
 
 async function chamadaAgente(ollama, corpo) {
-  const response = await request(`${normalizeBaseUrl(ollama.baseUrl)}/api/chat`, {
+  const enviar = (c) => request(`${normalizeBaseUrl(ollama.baseUrl)}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: ollama.model, stream: false, options: { num_ctx: ollama.numCtx }, ...corpo }),
+    body: JSON.stringify({ model: ollama.model, stream: false, options: { num_ctx: ollama.numCtx }, ...c }),
     signal: AbortSignal.timeout(ollama.timeoutMs ?? 900000),
+  });
+  const response = await enviar(corpo).catch((error) => {
+    if (!corpo.think || !/does not support thinking/.test(error.message)) throw error;
+    return enviar({ ...corpo, think: undefined });
   });
   const data = await response.json();
   if (data.error) throw new Error(`Ollama: ${data.error}`);
@@ -415,7 +420,7 @@ async function instrucoesDoProjeto(projectDir) {
 
 export async function agenteJson({ projectDir, prompt, schema, comFerramentas, ollama }) {
   const regras = comFerramentas
-    ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes. Os CLAUDE.md da raiz já estão abaixo; ao mexer em uma pasta que tenha CLAUDE.md próprio (api/, web/ etc.), leia-o antes.'
+    ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes. Para ir rápido: peça várias ferramentas na mesma resposta quando forem independentes e prefira buscar com "contexto" a ler o arquivo para ver poucas linhas. Os CLAUDE.md da raiz já estão abaixo; ao mexer em uma pasta que tenha CLAUDE.md próprio (api/, web/ etc.), leia-o antes.'
     : 'Responda só com o que está no enunciado.';
   const messages = [
     {
@@ -431,7 +436,7 @@ export async function agenteJson({ projectDir, prompt, schema, comFerramentas, o
         process.stderr.write(`    · leitura encerrada (limite de ${MAX_PASSOS_AGENTE} passos ou 80% do contexto de ${ollama.numCtx} tokens)\n`);
         break;
       }
-      const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, options: { num_ctx: ollama.numCtx, temperature: 0 } });
+      const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, think: 'high', options: { num_ctx: ollama.numCtx, temperature: 0 } });
       messages.push({ role: 'assistant', content: mensagem.content ?? '', tool_calls: mensagem.tool_calls });
       if (!mensagem.tool_calls?.length) break;
       for (const chamada of mensagem.tool_calls) {
@@ -443,8 +448,20 @@ export async function agenteJson({ projectDir, prompt, schema, comFerramentas, o
   }
   messages.push({ role: 'user', content: `Agora devolva a resposta final SOMENTE como JSON que siga EXATAMENTE este JSON Schema, com estas chaves e nenhuma outra:\n${JSON.stringify(schema)}` });
 
-  const final = await chamadaAgente(ollama, { messages, format: schema, options: { num_ctx: ollama.numCtx, temperature: 0 } });
-  const resposta = extrairJson(final.content);
+  let final = await chamadaAgente(ollama, { messages, format: schema, options: { num_ctx: ollama.numCtx, temperature: 0 } });
+  if (!String(final.content ?? '').trim()) {
+    process.stderr.write('    · o modelo só raciocinou e não respondeu; pedindo o JSON de novo\n');
+    messages.push({ role: 'user', content: 'Você não devolveu nada. Não há mais ferramentas: responda AGORA só com o JSON, usando o que já leu; o que não conseguiu confirmar vai em "sugestoes".' });
+    final = await chamadaAgente(ollama, { messages, format: schema, think: 'high', options: { num_ctx: ollama.numCtx, temperature: 0 } });
+  }
+  let resposta;
+  try {
+    resposta = extrairJson(final.content);
+  } catch (error) {
+    const bruta = path.join(projectDir, '.detro', 'ultima-resposta-agente.txt');
+    await writeFile(bruta, `CONTENT:\n${final.content ?? ''}\n\nTHINKING:\n${final.thinking ?? ''}`).catch(() => {});
+    throw new Error(`${error.message} (${String(final.content ?? '').length} caracteres; resposta bruta em ${path.relative(projectDir, bruta)})`);
+  }
   const faltando = (schema.required ?? []).filter((chave) => !(chave in resposta));
   if (faltando.length > 0) throw new Error(`a resposta do agente não segue o formato (faltou ${faltando.join(', ')})`);
   return resposta;
