@@ -1,6 +1,6 @@
 {
   "name": "@vitortrack777/detro",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "detro CLI: CLI de desenvolvimento com IA que gera CRUDs completos (banco, API e tela) e corrige código com Ollama, revisado pelo Claude Code. NestJS, React, TypeScript e PostgreSQL.",
   "type": "module",
   "bin": {
