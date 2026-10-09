@@ -331,7 +331,6 @@ export async function ollamaJson({ ollama, messages, schema, onProgress, attempt
   }
 }
 
-const MAX_PASSOS_AGENTE = 60;
 const MAX_SAIDA_FERRAMENTA = 60000;
 const git = promisify(execFile);
 
@@ -420,7 +419,7 @@ async function instrucoesDoProjeto(projectDir) {
 
 export async function agenteJson({ projectDir, prompt, schema, comFerramentas, ollama }) {
   const regras = comFerramentas
-    ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes. Para ir rápido: peça várias ferramentas na mesma resposta quando forem independentes e prefira buscar com "contexto" a ler o arquivo para ver poucas linhas. Os CLAUDE.md da raiz já estão abaixo; ao mexer em uma pasta que tenha CLAUDE.md próprio (api/, web/ etc.), leia-o antes.'
+    ? 'Suas ferramentas de leitura são listar_arquivos (Glob), buscar (Grep) e ler_arquivo (Read). Confirme no código antes de afirmar: nunca invente caminho, nome ou valor. Quando o enunciado citar Read/Grep/Glob, use as equivalentes. Para ir rápido: peça várias ferramentas na mesma resposta quando forem independentes e prefira buscar com "contexto" a ler o arquivo para ver poucas linhas; quando precisar ler, leia o bloco inteiro de uma vez (até 1000 linhas), nunca em janelas pequenas, e não releia o que já está na conversa. Os CLAUDE.md da raiz já estão abaixo; ao mexer em uma pasta que tenha CLAUDE.md próprio (api/, web/ etc.), leia-o antes.'
     : 'Responda só com o que está no enunciado.';
   const messages = [
     {
@@ -431,11 +430,7 @@ export async function agenteJson({ projectDir, prompt, schema, comFerramentas, o
   ];
 
   if (comFerramentas) {
-    for (let passo = 1; ; passo += 1) {
-      if (passo > MAX_PASSOS_AGENTE || (ollama.numCtx && estimateTokens(messages) > ollama.numCtx * 0.8)) {
-        process.stderr.write(`    · leitura encerrada (limite de ${MAX_PASSOS_AGENTE} passos ou 80% do contexto de ${ollama.numCtx} tokens)\n`);
-        break;
-      }
+    for (;;) {
       const mensagem = await chamadaAgente(ollama, { messages, tools: FERRAMENTAS_AGENTE, think: 'high', options: { num_ctx: ollama.numCtx, temperature: 0 } });
       messages.push({ role: 'assistant', content: mensagem.content ?? '', tool_calls: mensagem.tool_calls });
       if (!mensagem.tool_calls?.length) break;
