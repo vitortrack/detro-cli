@@ -33,6 +33,7 @@ detro apply
   - [O ciclo plan → dry-run → apply](#o-ciclo-plan--dry-run--apply)
   - [Contexto: o que os modelos recebem](#contexto-o-que-os-modelos-recebem)
   - [Ollama + Claude: quem faz o quê](#ollama--claude-quem-faz-o-quê)
+  - [Agente com modelo forte](#agente-com-modelo-forte)
   - [Modos de geração](#modos-de-geração)
 - [Guia de uso](#guia-de-uso)
   - [Criar um cadastro (CRUD)](#criar-um-cadastro-crud)
@@ -631,6 +632,23 @@ STACK DETECTADA: Frontend: React, Vite, ...; Backend: NestJS, ...; Banco/ORM: Ty
 
 No Ollama, esse bloco entra no início da mensagem `system`. No Claude, entra no topo do prompt.
 
+Nas etapas que leem o projeto (plano genérico, modo livre, ajuste de plano, correções e verificação
+final), seja o Claude ou o [agente](#agente-com-modelo-forte), o detro acrescenta também um
+**contexto da sessão**, recalculado a cada chamada (cerca de 700 tokens num projeto médio):
+
+```
+CONTEXTO DA SESSÃO (estado atual do repositório; confirme no código antes de usar):
+Branch: Card-960
+Últimos commits:            ← git log --oneline -5
+Alterações ainda não commitadas:   ← git status --short
+Pastas do projeto (até 4 níveis):  ← das pastas versionadas, no máximo 150
+NOTAS DO PROJETO (.detro/contexto.md), siga como instrução:
+<o seu texto>
+```
+
+O modelo sabe em que branch está, o que já foi feito e o que está pela metade, e onde fica cada
+módulo, sem gastar passos procurando.
+
 Por cima desse bloco, cada etapa acrescenta o que precisa:
 
 | Etapa | Contexto extra |
@@ -643,13 +661,83 @@ Por cima desse bloco, cada etapa acrescenta o que precisa:
 
 **Como dar mais contexto ao detro**
 
+Do mais geral ao mais específico. Cada camada tem um lugar certo; colocar a regra no lugar errado
+faz ela ser ignorada ou repetida em toda chamada à toa.
+
+| Camada | Onde | Vai em | Use para |
+|---|---|---|---|
+| 1. Descrição do projeto | `projeto.descricao` no `.detro/config.json` | Toda chamada | Uma frase: domínio e regras que valem para tudo |
+| 2. Regras do repositório | `CLAUDE.md` (raiz, `.claude/`, e um por pasta) | Claude e agente, carregado pelo Claude Code | Arquitetura, banco, estilo, segurança. Versionado e compartilhado com o time |
+| 3. Notas do detro | `.detro/contexto.md` | Toda etapa que lê o projeto | O que vale para os pedidos do detro e não pertence ao repositório |
+| 4. Modelo para copiar | Feature modelo ou `references` | Geração por exemplo/preset | O padrão visual e de código que o Ollama imita |
+| 5. O pedido | `detro plan "..."` ou `detro plan -f` | Só aquele pedido | O que fazer, com nomes, rótulos, telas e critérios |
+
 1. **`projeto.descricao`**: uma frase sobre o domínio e as regras que valem para tudo (multi-tenant,
    fuso, idioma das mensagens). Vai em toda chamada, então seja breve.
-2. **`CLAUDE.md` no repositório**: regras de arquitetura, banco e estilo. O Claude é instruído a lê-los
-   antes de propor qualquer coisa. É aqui que mora o detalhe; o detro não precisa saber dele.
-3. **Uma feature modelo** (criação por exemplo) ou **`references`** (preset): é o que o Ollama copia.
+2. **`CLAUDE.md` no repositório**: regras de arquitetura, banco e estilo. O Claude Code carrega o da
+   raiz e o de `.claude/` no início e o de cada pasta quando mexe nela. É aqui que mora o detalhe.
+3. **`.detro/contexto.md`**: texto livre, em Markdown, colado no topo de toda etapa que lê o projeto
+   (veja o exemplo abaixo). Não precisa de comando nem de configuração: criou o arquivo, passa a valer
+   na próxima chamada.
+4. **Uma feature modelo** (criação por exemplo) ou **`references`** (preset): é o que o Ollama copia.
    Veja [Projeto do zero](#projeto-do-zero-dando-um-modelo-para-o-ollama-copiar).
-4. **O próprio pedido**: nomes, rótulos, rota, permissão e ações escritos no pedido são seguidos.
+5. **O próprio pedido**: nomes, rótulos, rota, permissão e ações escritos no pedido são seguidos.
+
+**O que colocar no `.detro/contexto.md`**
+
+Aquilo que você repetiria em todo pedido e que o modelo não descobre lendo o código:
+
+- **Vocabulário do domínio**: o que cada termo significa e qual campo/tabela é cada coisa.
+- **Armadilhas conhecidas**: colunas parecidas com sentidos diferentes, fluxos que já quebraram.
+- **Onde fica cada coisa**: o arquivo certo para cada assunto, para o modelo não procurar.
+- **Como você quer a resposta**: escopo mínimo, o que nunca mexer, padrão de nomes.
+- **O que está em andamento**: o card atual e o que já foi decidido nele.
+
+Exemplo:
+
+```markdown
+# Contexto para o detro
+
+## Domínio
+- "Linha" é o serviço, "rota" é o caminho, "grade" é o planejado, "viagem" (trip) é o realizado.
+- `students.active` = aparece na lista; `students.transport_active` = recebe transporte. Nunca troque.
+
+## Onde mexer
+- Mapas: toda tela usa `web/src/components/map/MapBaseLayers.tsx` para as camadas (padrão: satélite).
+- Relatórios: um método + um `case` em `school-reports.service.ts`; não mexa em `paged()`.
+
+## Como responder
+- Só o que o pedido pede: nada de refatoração, validação ou arquivo extra.
+- Textos de tela em pt-BR; erros dizem o que fazer.
+- Nunca altere `db/init` existente; migration nova é arquivo novo.
+
+## Em andamento
+- Card-960: modo satélite nos mapas (feito). Próximo: remover botões de acesso ao admin.
+```
+
+Diferença para o `CLAUDE.md`: o `CLAUDE.md` é do repositório e vale para qualquer pessoa ou
+ferramenta. O `.detro/contexto.md` é seu, vale só para o detro, e pode ter o que é passageiro (o card
+de agora). Mantenha curto: ele vai inteiro em toda chamada.
+
+**Como escrever um bom pedido**
+
+O modelo só faz bem o que está claro no pedido. Um pedido bom diz **o quê**, **onde** e **como saber
+que ficou certo**:
+
+```
+Ruim:  adicione modo satelite nos mapas
+Bom:   Nas telas com mapa Leaflet (todas que usam TileLayer em web/src), troque a camada fixa por um
+       seletor Ruas/Satélite no canto superior direito, abrindo em Satélite. Use a URL de
+       MAPS_TILE_SATELITE_URL de web/src/config/config.ts. Não mude a tela de monitoramento (Map.tsx),
+       que já tem seletor próprio.
+```
+
+- **Diga onde**, se você sabe: arquivo, tela, módulo. Poupa leitura e evita mexer no lugar errado.
+- **Diga o que não mexer**: telas ou arquivos que devem ficar como estão.
+- **Dê os nomes**: rótulos, rota, permissão, nome do componente. O modelo segue o que está escrito.
+- **Diga o critério de aceite**: como você vai conferir que ficou certo.
+- **Pedido grande vai em arquivo** (`detro plan -f .detro/pedidos/x.md`), com seções; veja
+  [Pedido em arquivo](#pedido-em-arquivo).
 
 O Ollama tem janela limitada (`numCtx`, padrão 24.576 tokens). O detro estima o tamanho do prompt
 antes de enviar e recusa se passar de 80% da janela, em vez de deixar o Ollama cortar em silêncio.
@@ -688,7 +776,7 @@ pedido ──▶ ┌──────────────┐  resposta  ┌
 O detro executa o `claude` em modo não interativo:
 
 ```
-claude -p --output-format json --json-schema <schema> \
+claude -p --output-format stream-json --verbose --json-schema <schema> \
        --no-session-persistence --setting-sources project \
        --tools ""                  # revisão e geração estruturada
        --tools Read Grep Glob      # plano genérico, modo livre, revisão de plano
@@ -698,30 +786,91 @@ claude -p --output-format json --json-schema <schema> \
 - `--setting-sources project`: carrega só as configurações do projeto, não os seus plugins e hooks
   pessoais. O resultado não depende de quem está rodando.
 - `--json-schema`: a resposta vem estruturada e validada, sem texto solto para interpretar.
+- `stream-json`: o detro mostra ao vivo o que o modelo está fazendo (veja
+  [O que aparece na tela](#o-que-aparece-na-tela)).
 - `--no-session-persistence`: as chamadas não poluem o seu histórico do Claude Code.
 
 ### Agente com modelo forte
 
-Com `"agente": true`, o que hoje exige o Claude lendo o projeto (plano genérico, modo livre, ajuste de
-plano, correções e verificação final) passa primeiro por um agente do próprio detro, rodando o modelo
-de `ai.ollama.model`. Ele tem as mesmas ferramentas só de leitura (`listar_arquivos`, `buscar`,
-`ler_arquivo`), e o código continua passando por `tsc` e pelas regras do projeto. O Claude só entra
-se o agente falhar (erro, passou de 30 passos ou JSON fora do formato).
+Com `"agente": true`, as etapas que leem o projeto (plano genérico, modo livre, ajuste de plano,
+correções e verificação final) são feitas pelo modelo de `ai.ollama.model` **rodando dentro do próprio
+Claude Code**. O detro chama o mesmo `claude -p` de sempre, mas aponta o Claude Code para o Ollama:
 
-Precisa de um modelo forte em chamada de ferramentas. Modelos locais de 7–8B se perdem no laço;
-os de nuvem do Ollama funcionam bem:
+```
+ANTHROPIC_BASE_URL=<ai.ollama.baseUrl>  ANTHROPIC_AUTH_TOKEN=ollama  ANTHROPIC_API_KEY=
+claude -p --model <ai.ollama.model> --tools Read Grep Glob ...
+```
+
+O Ollama (0.14 ou mais novo) responde no mesmo protocolo da API do Claude, então o modelo ganha o
+mesmo harness do Claude: as ferramentas `Read`/`Grep`/`Glob`, os `CLAUDE.md` carregados do jeito
+certo, o [contexto da sessão](#contexto-o-que-os-modelos-recebem) e a resposta validada pelo
+`--json-schema`. O código continua passando por `tsc` e pelas regras do projeto.
+
+Se o agente falhar (erro, timeout, resposta fora do schema), aparece
+`↑ agente: <motivo> — chamando o Claude…` e o Claude de verdade refaz a etapa. Com
+`"claude": { "enabled": false }`, a falha vira erro na tela.
+
+Precisa de um modelo forte em chamada de ferramentas. Modelos locais de 7–8B se perdem; os de nuvem
+do Ollama funcionam bem:
 
 ```bash
 ollama signin                          # uma vez, com a conta do ollama.com
-ollama pull gpt-oss:120b-cloud         # só registra; roda na nuvem
-detro ai model gpt-oss:120b-cloud
+ollama pull glm-5.3-flash:cloud        # só registra; roda na nuvem
+detro ai model glm-5.3-flash:cloud
 ```
 
 ```json
-"ollama": { "model": "gpt-oss:120b-cloud", "agente": true, "claude": { "revisar": false } }
+"ollama": { "model": "glm-5.3-flash:cloud", "agente": true, "claude": { "revisar": false } }
 ```
 
+| Modelo | Perfil |
+|---|---|
+| `glm-5.3-flash:cloud` | Rápido, bom em ferramentas. Pode errar mais em pedidos que espalham por muitos arquivos |
+| `gpt-oss:120b-cloud` | Mais lento, mais cuidadoso. Vale testar no mesmo pedido e comparar |
+| `qwen2.5-coder:7b` (local) | Não serve como agente: não chama as ferramentas e inventa arquivos |
+
+No agente, `numCtx` não vale: o tamanho do contexto fica com o Claude Code e o Ollama.
+
 Com modelo de nuvem, **o código do projeto sai da máquina** para os servidores do Ollama.
+
+#### O que aparece na tela
+
+Toda chamada ao Claude ou ao agente mostra o trabalho ao vivo, como o Claude Code interativo:
+
+```
+  ▸ agente glm-5.3-flash:cloud lendo o projeto…
+  ✻ The user asks which layer MapBaseLayers opens marked…
+  ● Grep(MapBaseLayers)
+    ⎿ 2 linhas
+  ● Read(web/src/components/map/MapBaseLayers.tsx)
+    ⎿ 29 linhas
+  ● O Satélite abre marcado, em MapBaseLayers.tsx:19…
+  ⧗ 41.9k tokens nesta chamada (entrada 41.6k, 17.0k do cache · saída 250) · 83.0k no total
+```
+
+| Sinal | Significado |
+|---|---|
+| `▸` | Começo da etapa e quem atende |
+| `✻` | Raciocínio do modelo (uma linha, no idioma em que o modelo pensa) |
+| `●` verde | Ferramenta chamada, com o arquivo ou o padrão buscado |
+| `⎿` | Resultado da ferramenta: tamanho, ou `erro:` com o motivo |
+| `●` branco | Texto que o modelo escreveu |
+| `⧗` | Tokens da chamada (entrada, quanto veio do cache, saída) e o total somado em todo o comando |
+| `↑` | O agente falhou e o Claude assumiu |
+
+Cada chamada tem um custo fixo de uns 40k tokens (instruções e ferramentas do Claude Code, mais os
+`CLAUDE.md`), boa parte servida do cache. Um `detro plan` com correções e verificação final faz várias
+chamadas: acompanhe o total no `⧗`.
+
+**Como diagnosticar**
+
+| Sintoma na tela | Causa provável | O que fazer |
+|---|---|---|
+| Muitos `●` lendo o mesmo arquivo em pedaços | Pedido vago; o modelo está procurando | Diga o arquivo ou a tela no pedido, ou em `.detro/contexto.md` |
+| `●` com arquivo que não existe, `⎿ erro:` | O modelo chutou um caminho | Ponha o mapa de onde fica cada coisa no `.detro/contexto.md` |
+| Proposta mexe em coisa que você não pediu | Faltou dizer o que não mexer | Acrescente ao pedido; regra permanente vai no `.detro/contexto.md` |
+| `↑ agente: … chamando o Claude` com frequência | Modelo fraco para o tamanho do pedido | Quebre o pedido em partes ou troque o modelo |
+| `⧗` muito alto | Muitas etapas ou correções | Pedido mais preciso; `"verificarFeature": false` se não precisar |
 
 ### Modos de geração
 
@@ -1064,7 +1213,7 @@ escrever é mesclado por cima deles, então basta incluir o que muda.
 | `numCtx` | `24576` | Janela de contexto em tokens. Maior usa mais memória. Troque com `detro ai ctx` |
 | `temperature` | `0.2` | Variação das respostas livres. Respostas estruturadas sempre usam `0` |
 | `timeoutMs` | `900000` (15 min) | Tempo máximo **sem gerar nada**; o contador reinicia a cada pedaço recebido |
-| `agente` | `false` | Liga o [agente](#agente-com-modelo-forte): o modelo do Ollama lê o projeto sozinho e faz o que hoje é do Claude |
+| `agente` | `false` | Liga o [agente](#agente-com-modelo-forte): o modelo do Ollama roda dentro do Claude Code e faz o que hoje é do Claude |
 
 ### `ai.ollama.claude`
 
@@ -1102,12 +1251,13 @@ escrever é mesclado por cima deles, então basta incluir o que muda.
 | Arquivo | Criado por | Conteúdo |
 |---|---|---|
 | `config.json` | Você, ou `detro ai model`/`ctx`/`provider` | Configuração |
+| `contexto.md` | Você | Notas coladas no topo de toda etapa que lê o projeto (veja [Contexto](#contexto-o-que-os-modelos-recebem)) |
 | `last-plan.json` | `detro plan` | O plano atual. Pode ser editado à mão (depois: `--revalidar`) |
 | `last-implementation.json` | `apply --dry-run`, `plan --livre`, `fix`, `menu` | Os arquivos prontos para o `apply`, com hash do plano e dos originais |
 | `last-attempt.json` | `apply --dry-run` que falhou | A última tentativa, para diagnóstico |
 | `pedidos/` | Você | Pedidos em Markdown para `detro plan -f` |
 
-Recomendação: versione `config.json` e `pedidos/`, e ponha os `last-*.json` no `.gitignore`.
+Recomendação: versione `config.json`, `contexto.md` e `pedidos/`, e ponha os `last-*.json` no `.gitignore`.
 
 ## Detecção de stack
 

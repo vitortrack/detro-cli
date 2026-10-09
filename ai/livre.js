@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import chalk from 'chalk';
 import { sha256 } from './generator.js';
 import { saveImplementation } from './implementationStore.js';
@@ -91,7 +92,30 @@ function montarCorrecao(request, relativo, conteudo, erros, novo) {
 
 export const quemAtende = (ollama) => (ollama?.agente ? `o agente (${ollama.model})` : 'o Claude');
 
+const MAX_PASTAS = 150;
+
+async function contextoDaSessao(projectDir) {
+  const git = (args) => promisify(execFile)('git', args, { cwd: projectDir, maxBuffer: 5e7 }).then(({ stdout }) => stdout.trim(), () => '');
+  const [branch, commits, alterados, arquivos, notas] = await Promise.all([
+    git(['branch', '--show-current']),
+    git(['log', '--oneline', '-5']),
+    git(['status', '--short']),
+    git(['ls-files']),
+    readFile(path.join(projectDir, '.detro', 'contexto.md'), 'utf8').then((texto) => texto.trim(), () => ''),
+  ]);
+  const pastas = [...new Set(arquivos.split('\n').map((arquivo) => arquivo.split('/').slice(0, -1).slice(0, 4).join('/')).filter(Boolean))].sort();
+  return [
+    'CONTEXTO DA SESSÃO (estado atual do repositório; confirme no código antes de usar):',
+    branch && `Branch: ${branch}`,
+    commits && `Últimos commits:\n${commits}`,
+    `Alterações ainda não commitadas:\n${alterados || '(nenhuma)'}`,
+    pastas.length > 0 && `Pastas do projeto (até 4 níveis):\n${pastas.slice(0, MAX_PASTAS).join('\n')}${pastas.length > MAX_PASTAS ? `\n(+${pastas.length - MAX_PASTAS} pastas)` : ''}`,
+    notas && `NOTAS DO PROJETO (.detro/contexto.md), siga como instrução:\n${notas}`,
+  ].filter(Boolean).join('\n\n');
+}
+
 export async function chamarIaJson({ ollama, ...pedido }) {
+  pedido = { ...pedido, prompt: `${await contextoDaSessao(pedido.projectDir)}\n\n${pedido.prompt}` };
   if (ollama?.agente) {
     process.stderr.write(`  ▸ agente ${ollama.model} lendo o projeto…\n`);
     try {
